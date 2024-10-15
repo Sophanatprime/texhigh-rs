@@ -1,13 +1,15 @@
 use hashers::fx_hash::FxHasher64;
 use indexmap::{map::IntoIter as IndexMapIntoIter, IndexMap};
+use log::{info, warn};
 use std::cell::{Ref, RefCell, RefMut};
 use std::convert::{Into, TryInto};
 use std::default::Default;
+use std::fmt::Debug;
 use std::hash::{BuildHasherDefault, Hash, Hasher};
 use std::iter::{Iterator, Step};
 use std::rc::{Rc, Weak};
 use std::str::{Chars, FromStr};
-use std::{u32, vec};
+use std::{io, vec};
 
 use crate::range::{parse_num, parse_num_range, try_get_char, NumberSpan};
 
@@ -18,6 +20,9 @@ pub enum ErrorKind {
     EmptyInput,
     InvalidNumber,
     CharFromNumber,
+    InvalidString,
+    InvalidPath,
+    InvalidFileContent,
 }
 
 pub struct CTab {
@@ -457,6 +462,18 @@ impl CTabSet {
         }
     }
 
+    pub fn get_catcode_value(&self, name: &str, at: char) -> Option<CatCode> {
+        self.ctabs.get(name)?.borrow().get(at)
+    }
+
+    pub fn get_escape_char(&self, name: &str) -> Option<char> {
+        self.ctabs.get(name)?.borrow().get_escape_char()
+    }
+
+    pub fn get_endline_char(&self, name: &str) -> Option<char> {
+        self.ctabs.get(name)?.borrow().get_endline_char()
+    }
+
     // Return true if an equivalent to key exists in the ctabs.
     pub fn contains_key(&self, name: &str) -> bool {
         self.ctabs.contains_key(name)
@@ -732,7 +749,9 @@ impl CTabSet {
                 }
             }
         } else {
-            set_e_e_char(&key_str, &val_str, &mut ctab, &mut ignored_lines);
+            if !key_str.is_empty() {
+                set_e_e_char(&key_str, &val_str, &mut ctab, &mut ignored_lines);
+            }
         }
 
         if !name.is_empty() {
@@ -742,7 +761,11 @@ impl CTabSet {
         if in_name {
             ignored_lines += 1;
         }
-        println!(">>--- Ignoring {} line(s) ---<<", ignored_lines);
+        if ignored_lines > 0 {
+            warn!(target: "Parsing CTabSet", ">>--- Ignoring {} line(s) ---<<", ignored_lines);
+        } else {
+            info!(target: "Parsing CTabSet", ">>--- Ignoring {} line(s) ---<<", ignored_lines);
+        }
         Ok(ctabset)
     }
 }
@@ -771,6 +794,14 @@ impl IntoIterator for CTabSet {
     type Item = (String, CTab);
     fn into_iter(self) -> Self::IntoIter {
         CTabSetIntoIter::new(self)
+    }
+}
+
+impl Extend<(String, CTab)> for CTabSet {
+    fn extend<T: IntoIterator<Item = (String, CTab)>>(&mut self, iter: T) {
+        for (name, ctab) in iter.into_iter() {
+            self.ctabs.insert(name, Rc::new(RefCell::new(ctab)));
+        }
     }
 }
 
@@ -919,6 +950,8 @@ impl TryFrom<&String> for CatCode {
 
 pub trait CatCodeGetter {
     fn catcode_value(&self, at: char) -> Option<CatCode>;
+    fn escape_char(&self) -> Option<char>;
+    fn endline_char(&self) -> Option<char>;
 }
 
 pub struct CTabFallbackable<'a, T: CatCodeGetter> {
@@ -936,15 +969,33 @@ impl CatCodeGetter for CTab {
     fn catcode_value(&self, at: char) -> Option<CatCode> {
         self.get(at)
     }
+    fn escape_char(&self) -> Option<char> {
+        self.get_escape_char()
+    }
+    fn endline_char(&self) -> Option<char> {
+        self.get_endline_char()
+    }
 }
 impl CatCodeGetter for Ref<'_, CTab> {
     fn catcode_value(&self, at: char) -> Option<CatCode> {
         self.get(at)
     }
+    fn escape_char(&self) -> Option<char> {
+        self.get_escape_char()
+    }
+    fn endline_char(&self) -> Option<char> {
+        self.get_endline_char()
+    }
 }
 impl CatCodeGetter for RefMut<'_, CTab> {
     fn catcode_value(&self, at: char) -> Option<CatCode> {
         self.get(at)
+    }
+    fn escape_char(&self) -> Option<char> {
+        self.get_escape_char()
+    }
+    fn endline_char(&self) -> Option<char> {
+        self.get_endline_char()
     }
 }
 impl<'a, T: CatCodeGetter> CatCodeGetter for CTabFallbackable<'a, T> {
@@ -958,39 +1009,92 @@ impl<'a, T: CatCodeGetter> CatCodeGetter for CTabFallbackable<'a, T> {
             // },
         }
     }
+    fn escape_char(&self) -> Option<char> {
+        self.ctab.escape_char()
+    }
+    fn endline_char(&self) -> Option<char> {
+        self.ctab.endline_char()
+    }
 }
 
-#[derive(Debug, PartialEq, Eq)]
 pub struct ControlSequence {
     csname: String,
 }
-impl ControlSequence {
-    pub fn csname(&self) -> &str {
-        &self.csname
+impl Debug for ControlSequence {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let tag = unsafe { *self.csname.as_bytes().get_unchecked(0) };
+        f.write_fmt(format_args!(
+            "ControlSequence {{ csname: '{}', tag: {} }}",
+            self.get_csname(),
+            match tag {
+                0 => "ControlWord",
+                1 => "ControlSymbol",
+                2 => "ControlSpace",
+                _ => unreachable!(),
+            }
+        ))
     }
 }
-
-impl<T: AsRef<str>> From<T> for ControlSequence {
-    fn from(value: T) -> Self {
-        ControlSequence {
-            csname: value.as_ref().to_string(),
+impl PartialEq for ControlSequence {
+    fn eq(&self, other: &Self) -> bool {
+        self.get_csname() == other.get_csname()
+    }
+}
+impl Eq for ControlSequence {}
+impl ControlSequence {
+    /// Control Word.
+    pub fn new_cwo<T: AsRef<str>>(s: T) -> Self {
+        if s.as_ref() == " " {
+            ControlSequence::new_csp()
+        } else {
+            ControlSequence {
+                csname: format!("{}{}", '\x00', s.as_ref()),
+            }
         }
     }
-}
-impl Hash for ControlSequence {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.csname.hash(state);
+    /// Control Symbol.
+    pub fn new_csy(s: char) -> Self {
+        if s == ' ' {
+            ControlSequence::new_csp()
+        } else {
+            ControlSequence {
+                csname: format!("{}{}", '\x01', s),
+            }
+        }
     }
-}
-
-impl ControlSequence {
-    pub fn new(name: &str) -> ControlSequence {
+    /// Control Space.
+    pub fn new_csp() -> Self {
         ControlSequence {
-            csname: name.to_string(),
+            csname: "\x02 ".to_string(),
         }
     }
     pub fn get_csname(&self) -> &str {
-        &self.csname
+        unsafe { self.csname.get_unchecked(1..self.csname.len()) }
+    }
+    pub fn cs_with_escape_char(&self, escape_char: Option<char>) -> String {
+        match escape_char {
+            Some(chr) => format!("{}{}", chr, self.get_csname()),
+            None => self.get_csname().to_string(),
+        }
+    }
+    /// Write cs to stream, but do not process invisible and unprintable char.
+    pub unsafe fn write<T: io::Write>(
+        &self,
+        escape_char: Option<char>,
+        stream: &mut T,
+    ) -> io::Result<()> {
+        match escape_char {
+            Some(chr) => write!(stream, "{}", chr)?,
+            _ => {}
+        };
+        write!(stream, "{}", self.get_csname())?;
+        Ok(())
+    }
+}
+
+impl Hash for ControlSequence {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.get_csname().hash(state);
     }
 }
 
@@ -1001,11 +1105,25 @@ pub struct Character {
 }
 
 impl Character {
-    pub fn new(charcode: char, catcode: CatCode) -> Character {
+    pub fn new(charcode: char, catcode: CatCode) -> Self {
         Character { charcode, catcode }
+    }
+    pub fn space() -> Self {
+        Character {
+            charcode: ' ',
+            catcode: CatCode::Space,
+        }
     }
     pub fn get_pairs(&self) -> (char, CatCode) {
         (self.charcode, self.catcode)
+    }
+    pub unsafe fn write<T: io::Write>(&self, stream: &mut T) -> io::Result<()> {
+        if self.charcode == '\r' {
+            write!(stream, "\n")?;
+        } else {
+            write!(stream, "{}", self.charcode)?;
+        }
+        Ok(())
     }
 }
 
@@ -1043,6 +1161,7 @@ impl From<Character> for Token {
     }
 }
 
+#[derive(Debug)]
 pub struct TokenList {
     values: Vec<Token>,
 }
@@ -1050,6 +1169,14 @@ pub struct TokenList {
 impl TokenList {
     pub fn new() -> Self {
         TokenList { values: Vec::new() }
+    }
+    pub fn parse<S: AsRef<str>, C: CatCodeGetter>(source: S, catcode: &C) -> Self {
+        let endline = match catcode.endline_char() {
+            Some(chr) => format!("{}", chr),
+            None => "".to_string(),
+        };
+        let s = source.as_ref().lines().collect::<Vec<_>>().join(&endline);
+        TokenList::_parse(s.chars(), catcode)
     }
     pub fn push<T: Into<Token>>(&mut self, token: T) {
         self.values.push(token.into());
@@ -1059,6 +1186,67 @@ impl TokenList {
     }
     pub fn iter_mut(&mut self) -> std::slice::IterMut<'_, Token> {
         self.values.iter_mut()
+    }
+    /// Write tokenlist to stream, but do not process invisible and unprintable char.
+    pub unsafe fn write<T: io::Write>(
+        &self,
+        escape_char: Option<char>,
+        stream: &mut T,
+    ) -> io::Result<()> {
+        for token in self.iter() {
+            match token {
+                Token::CS(cs) => cs.write(escape_char, stream)?,
+                Token::Char(chr) => chr.write(stream)?,
+                Token::Any(chr) if *chr == '\n' as u32 || *chr == '\r' as u32 => {
+                    write!(stream, "\n")?
+                }
+                Token::Any(_) => unreachable!(),
+            };
+        }
+        Ok(())
+    }
+
+    fn _parse<C: CatCodeGetter>(mut source: Chars, catcode: &C) -> TokenList {
+        let mut res = Vec::new();
+
+        let mut cs_name = String::new();
+        let mut collect_cs = false;
+
+        while let Some(chr) = source.next() {
+            let cat = catcode.catcode_value(chr).unwrap_or_default();
+            if collect_cs {
+                if cat == CatCode::Letter {
+                    cs_name.push(chr);
+                    continue;
+                } else if cs_name.is_empty() {
+                    res.push(Token::CS(ControlSequence::new_csy(chr)));
+                    collect_cs = false;
+                    continue;
+                } else {
+                    res.push(Token::CS(ControlSequence::new_cwo(&cs_name)));
+                    cs_name.clear();
+                    collect_cs = false;
+                }
+            }
+            if cat == CatCode::Escape {
+                collect_cs = true;
+            } else {
+                res.push(Token::Char(Character::new(chr, cat)));
+            }
+        }
+        if !cs_name.is_empty() {
+            let i_from = cs_name.floor_char_boundary(cs_name.len() - 1);
+            let last_char = cs_name[i_from..cs_name.len()].chars().next().unwrap();
+            if last_char == ' ' && cs_name.len() == 1 {
+                res.push(Token::CS(ControlSequence::new_csp()));
+            } else if catcode.catcode_value(last_char) == Some(CatCode::Letter) {
+                res.push(Token::CS(ControlSequence::new_cwo(&cs_name)));
+            } else {
+                res.push(Token::CS(ControlSequence::new_csy(last_char)));
+            }
+            cs_name.clear();
+        }
+        TokenList { values: res }
     }
 }
 impl IntoIterator for TokenList {
@@ -1445,6 +1633,13 @@ mod tests {
         assert_eq!(ctab_empty.get_endline_char(), Some('\\'));
         assert_eq!(ctab_empty.get_escape_char(), Some(' '));
         assert!(ctabset.get_by_name("lk").is_some());
+
+        assert_eq!(ctabset.get_catcode_value("main", ' '), Some(Space));
+        assert_eq!(ctabset.get_escape_char("main"), None);
+        assert_eq!(ctabset.get_endline_char("main"), None);
+        assert_eq!(ctabset.get_escape_char("error"), Some('\\'));
+        assert_eq!(ctabset.get_escape_char("empty"), Some(' '));
+        assert_eq!(ctabset.get_endline_char("empty"), Some('\\'));
     }
 
     #[test]
@@ -1477,6 +1672,9 @@ mod tests {
         "#,
         )
         .unwrap();
+
+        assert_eq!(ctabset.get_escape_char("initex"), Some('\\'));
+        assert_eq!(ctabset.get_endline_char("initex"), Some('\x0D'));
 
         {
             let initex = ctabset
@@ -1519,7 +1717,16 @@ mod tests {
             assert_eq!(latex3_fb.catcode_value(':'), Some(Letter));
             assert_eq!(latex3_fb.catcode_value('_'), Some(Letter));
             assert_eq!(latex3_fb.catcode_value(' '), Some(Ignored));
+
+            assert_eq!(ctabset.get_escape_char("latex"), Some('\\'));
+            assert_eq!(ctabset.get_endline_char("latex"), Some('\x0D'));
         }
+
+        assert_eq!(ctabset.get_escape_char("latex3"), Some('\\'));
+        assert_eq!(ctabset.get_endline_char("latex3"), Some('\x0D'));
+
+        assert_eq!(ctabset.get_escape_char("None"), None);
+        assert_eq!(ctabset.get_endline_char("None"), None);
 
         for (name, ctab) in ctabset {
             println!("Get: name={}, len={}", name, ctab.len());
