@@ -1,0 +1,15 @@
+[package]
+name = "texhigh"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+hashers = "*"
+itoa = "1"
+ryu = "1"
+toml = "^0.8"
+clap = "~4"
+pest = "~2"
+indexmap = "2"
