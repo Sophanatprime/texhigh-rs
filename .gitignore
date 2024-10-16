@@ -1,3 +1,4 @@
 /target
 *.rs-bak
 *.lock
+latex test*

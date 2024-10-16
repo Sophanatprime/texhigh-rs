@@ -19,3 +19,10 @@ lazy_static = "1"
 bitflags = "2"
 log = "0"
 env_logger = "0"
+encoding_rs = "*"
+codepage = "*"
+winapi = { version = "*", features = ["winnls"]}
+
+# [profile.release]
+# lto = true
+# opt-level = 1

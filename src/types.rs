@@ -23,6 +23,7 @@ pub enum ErrorKind {
     InvalidString,
     InvalidPath,
     InvalidFileContent,
+    IOError,
 }
 
 pub struct CTab {

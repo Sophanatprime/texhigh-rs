@@ -1,10 +1,12 @@
-#![feature(step_trait, char_min, iter_advance_by, round_char_boundary)]
+#![feature(step_trait, iter_advance_by, round_char_boundary)]
 // #![allow(unused)]
 
-use clap::{arg, Arg, ArgAction, Command};
+use clap::{arg, Arg, ArgAction, ArgMatches, Command};
 use env_logger;
-use std::env::set_var as set_env_var;
+use std::{env::set_var as set_env_var, ffi::OsString};
 
+mod kpathsea;
+pub use kpathsea::KpseWhich;
 pub mod config;
 pub mod high;
 pub mod range;
@@ -15,7 +17,7 @@ const REVERSION: &str = ".1";
 const DATE: &str = "2024/06/15";
 const COPYRIGHT: &str = "2024, Wenjian Chern ©";
 
-pub fn run() {
+pub fn get_matches() -> ArgMatches {
     let matches = Command::new("texhigh")
         .about("Highlight TeX texts")
         .arg(
@@ -80,8 +82,14 @@ pub fn run() {
                 .long("file")
                 .short('f')
                 .value_name("FILE")
-                .help("files to be highlight")
+                .help("file to be highlight")
                 .conflicts_with("text"),
+        )
+        .arg(
+            Arg::new("kpse-args")
+                .last(true)
+                .num_args(0..)
+                .help("arguments for kpsewhich"),
         )
         .get_matches();
 
@@ -98,4 +106,36 @@ pub fn run() {
         None => {}
     }
     env_logger::init();
+
+    matches
+}
+
+pub fn get_kpse_matches<I, T>(s: I) -> ArgMatches
+where
+    I: IntoIterator<Item = T>,
+    T: Into<OsString> + Clone,
+{
+    let matches = Command::new("kpsewhich")
+        .no_binary_name(true)
+        .arg(Arg::new("encoding").long("encoding"))
+        .arg(Arg::new("all").long("all").action(ArgAction::SetTrue))
+        .arg(
+            Arg::new("must-exist")
+                .long("must-exist")
+                .alias("mustexist")
+                .action(ArgAction::SetTrue),
+        )
+        .arg(Arg::new("path").long("path"))
+        .arg(Arg::new("subdir").long("subdir").alias("sub-dir"))
+        .arg(Arg::new("texinputs").long("texinputs").alias("tex-inputs"))
+        .arg(
+            Arg::new("texpath")
+                .long("texpath")
+                .alias("tex-path")
+                .default_missing_value("")
+                .num_args(0..=1)
+                .conflicts_with("texinputs"),
+        )
+        .get_matches_from(s);
+    matches
 }
