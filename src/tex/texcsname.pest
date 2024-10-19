@@ -1,0 +1,68 @@
+letter_any = @{ ASCII_ALPHA }
+letter_normal = @{ ASCII_ALPHA_LOWER+ }
+carmal_case = @{ ASCII_ALPHA_UPPER ~ (ASCII_ALPHA_LOWER | ASCII_ALPHA_UPPER)* }
+collon = { ":" }
+underscore = { "_" }
+at = { "@" }
+
+csname_l3_func_pub = @{
+    letter_any+ ~ underscore* ~ !(underscore) ~ (underscore | letter_any)* ~ collon ~ (collon | underscore | letter_any)*
+}
+csname_l3_func_internal = @{
+    letter_any+ ~ underscore{2} ~ (underscore | letter_any)* ~ collon ~ (collon | underscore | letter_any)*
+}
+csname_l3_func_kernel = @{
+    underscore{2} ~ "kernel" ~ underscore ~ (underscore | letter_any)* ~ collon ~ (collon | underscore | letter_any)*
+}
+csname_l3_primitive = @{
+    "tex_" ~ (underscore | letter_any)+ ~ collon ~ "D"
+}
+csname_l3_var_prefix = { "l" | "g" | "c" | "s" | "q" }
+csname_l3_var_pub = @{
+    csname_l3_var_prefix ~ underscore ~ letter_any ~ (underscore | letter_any)*
+}
+csname_l3_var_internal = @{
+    csname_l3_var_prefix ~ underscore{2} ~ (underscore | letter_any)+
+}
+csname_l3_var_kernel = @{
+    csname_l3_var_prefix ~ underscore{2} ~ "kernel" ~ underscore ~ (underscore | letter_any) +
+}
+cs_code = {
+    (SOI ~ csname_l3_func_pub ~ EOI) |
+    (SOI ~ csname_l3_var_pub ~ EOI)
+}
+
+csname_carmal_case_small = @{ ASCII_ALPHA | letter_normal ~ csname_pascal* }
+csname_pascal = @{ carmal_case }
+cs_document = { 
+    (SOI ~ csname_carmal_case_small ~ EOI) |
+    (SOI ~ csname_pascal ~ EOI)
+}
+
+csname_punct = { 
+    "!" | "@" | "#" | "$" | "%" | "^" | "&" | 
+    "*" | "-" | "+" | "=" |
+    "(" | ")" | "{" | "}" | "[" | "]" | "<" | ">" |
+    ":" | ";" | "\"" | "'" | "|" | "\\" | 
+    "," | "." | "?" | "/"
+}
+cs_punct = { SOI ~ csname_punct ~ EOI }
+
+csname_l2e_internal = @{ 
+    at ~ (at | letter_any)+ | letter_any+ ~ at ~ (at | letter_any)*
+}
+cs_internal = {
+    (SOI ~ csname_l2e_internal ~ EOI) |
+    (SOI ~ csname_l3_func_internal ~ EOI) |
+    (SOI ~ csname_l3_var_internal ~ EOI)
+}
+
+csname_l2e_kernel = @{ at ~ "kernel" ~ csname_l2e_internal }
+cs_kernel = {
+    (SOI ~ csname_l2e_kernel ~ EOI) |
+    (SOI ~ csname_l3_primitive ~ EOI) |
+    (SOI ~ csname_l3_func_kernel ~ EOI) |
+    (SOI ~ csname_l3_var_kernel ~ EOI)
+}
+
+cs = _{ cs_kernel | cs_internal | cs_code | cs_document | cs_punct }

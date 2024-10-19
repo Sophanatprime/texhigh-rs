@@ -1,11 +1,70 @@
-// use config::{Config, Environment, File};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use serde_with::{DeserializeFromStr, SerializeDisplay};
+use std::collections::{HashMap, HashSet};
+use std::fmt::Display;
 use std::path::Path;
 use std::str::FromStr;
 use std::{fs, io};
+use regex::Regex;
 
 use crate::types::{CTabSet, ErrorKind};
+
+#[derive(Debug, DeserializeFromStr, SerializeDisplay)]
+pub struct HighRegex(Regex);
+impl HighRegex {
+    pub fn is_match(&self, s: &str) -> bool {
+        self.0.is_match(s)
+    }
+}
+impl Display for HighRegex {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.0.as_str())
+    }
+}
+impl FromStr for HighRegex {
+    type Err = ErrorKind;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match Regex::new(s) {
+            Ok(re) => Ok(HighRegex(re)),
+            Err(_) => Err(ErrorKind::RegexError),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(untagged)]
+pub enum Category {
+    CS(HashSet<String>),
+    Regex(HighRegex),
+}
+impl Category {
+    pub fn contains(&self, s: &str) -> bool {
+        match self {
+            Category::CS(cs) => cs.contains(s),
+            Category::Regex(re) => re.is_match(s),
+        }
+    }
+}
+#[derive(Debug, Deserialize, Serialize)]
+pub struct CSCategories(pub HashMap<String, Category>);
+impl CSCategories {
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+    pub fn categories(&self, s: &str) -> Option<&str> {
+        for (k, v) in self.0.iter() {
+            if v.contains(s) {
+                return Some(k);
+            }
+        }
+        None
+    }
+}
+impl Default for CSCategories {
+    fn default() -> Self {
+        Self(HashMap::new())
+    }
+}
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct HighConfig {
@@ -19,6 +78,10 @@ pub struct HighConfig {
     pub lines: [u16; 2],
     #[serde(skip_serializing_if = "LexerRangeType::is_empty")]
     pub ranges: LexerRangeType,
+    #[serde(skip_serializing_if = "CSCategories::is_empty")]
+    pub cs_categories: CSCategories,
+    #[serde(skip_serializing_if = "HashMap::is_empty")]
+    pub ctabs_fallback: HashMap<String, Vec<String>>,
 }
 impl Default for HighConfig {
     fn default() -> Self {
@@ -32,6 +95,8 @@ impl Default for HighConfig {
             replace_tab: false,
             lines: [0, 0],
             ranges: LexerRangeType::default(),
+            cs_categories: CSCategories::default(),
+            ctabs_fallback: HashMap::new(),
         }
     }
 }
@@ -55,7 +120,7 @@ impl From<Vec<char>> for BreakAfterType {
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(transparent)]
-pub struct LexerRangeType(HashMap<String, [[u16; 2]; 2]>);
+pub struct LexerRangeType(pub HashMap<String, [[u16; 2]; 2]>);
 impl LexerRangeType {
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()

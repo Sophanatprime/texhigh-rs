@@ -7,14 +7,15 @@ edition = "2021"
 
 [dependencies]
 hashers = "*"
-itoa = "1"
-ryu = "1"
 toml = "^0.8"
 clap = "~4"
+regex = "1"
 pest = "~2"
+pest_derive = "2"
 indexmap = "2"
 config = "~0"
 serde = { version = "1", features = ["derive"]}
+serde_with = "3"
 lazy_static = "1"
 bitflags = "2"
 log = "0"
@@ -22,7 +23,9 @@ env_logger = "0"
 encoding_rs = "*"
 codepage = "*"
 winapi = { version = "*", features = ["winnls"]}
+unicode-properties = "*"
+unicode-blocks = "*"
 
-# [profile.release]
-# lto = true
-# opt-level = 1
+[profile.release]
+lto = true
+opt-level = 1

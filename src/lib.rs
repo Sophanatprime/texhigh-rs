@@ -6,11 +6,13 @@ use env_logger;
 use std::{env::set_var as set_env_var, ffi::OsString};
 
 mod kpathsea;
+mod tex;
 pub use kpathsea::KpseWhich;
 pub mod config;
 pub mod high;
 pub mod range;
 pub mod types;
+mod unicode;
 
 const VERSION: i32 = 0;
 const REVERSION: &str = ".1";
@@ -31,6 +33,13 @@ pub fn get_matches() -> ArgMatches {
             arg!(--"logging-level" <LEVEL>)
                 .alias("ll")
                 .value_parser(["error", "warn", "trace", "debug", "info"]),
+        )
+        .arg(
+            Arg::new("current-ctab")
+                .long("current-ctab")
+                .alias("cc")
+                .default_value("latex")
+                .help("set current catcode table"),
         )
         .arg(
             Arg::new("ctab-set")
@@ -59,8 +68,10 @@ pub fn get_matches() -> ArgMatches {
             Arg::new("config")
                 .long("config")
                 .alias("c")
-                .help("text of config")
-                .action(ArgAction::Append),
+                .value_names(["key", "value"])
+                .num_args(2)
+                .action(ArgAction::Append)
+                .help("text of config"),
         )
         .arg(
             Arg::new("config-file")
@@ -84,6 +95,12 @@ pub fn get_matches() -> ArgMatches {
                 .value_name("FILE")
                 .help("file to be highlight")
                 .conflicts_with("text"),
+        )
+        .arg(
+            Arg::new("output")
+                .long("output")
+                .short('o')
+                .help("output to file"),
         )
         .arg(
             Arg::new("kpse-args")

@@ -1,3 +1,4 @@
+use core::fmt;
 use hashers::fx_hash::FxHasher64;
 use indexmap::{map::IntoIter as IndexMapIntoIter, IndexMap};
 use log::{info, warn};
@@ -7,11 +8,14 @@ use std::default::Default;
 use std::fmt::Debug;
 use std::hash::{BuildHasherDefault, Hash, Hasher};
 use std::iter::{Iterator, Step};
+use std::ops::{Deref, Index, IndexMut};
 use std::rc::{Rc, Weak};
 use std::str::{Chars, FromStr};
 use std::{io, vec};
+use unicode_properties::{GeneralCategoryGroup, UnicodeGeneralCategory};
 
 use crate::range::{parse_num, parse_num_range, try_get_char, NumberSpan};
+use crate::unicode::{get_char_range_from_block_name as get_from_block, get_cjk_ideographs_blocks};
 
 #[derive(Debug, PartialEq)]
 #[non_exhaustive]
@@ -24,6 +28,28 @@ pub enum ErrorKind {
     InvalidPath,
     InvalidFileContent,
     IOError,
+    FormatError,
+    RegexError,
+}
+impl fmt::Display for ErrorKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_fmt(format_args!("{:?}", self))
+    }
+}
+impl From<ErrorKind> for Result<(), ErrorKind> {
+    fn from(value: ErrorKind) -> Self {
+        Err(value)
+    }
+}
+impl From<io::Error> for ErrorKind {
+    fn from(_: io::Error) -> Self {
+        ErrorKind::IOError
+    }
+}
+impl From<fmt::Error> for ErrorKind {
+    fn from(_: fmt::Error) -> Self {
+        ErrorKind::FormatError
+    }
 }
 
 pub struct CTab {
@@ -48,6 +74,27 @@ impl CTab {
     pub fn len(&self) -> usize {
         self.catcodes.len()
     }
+
+    pub fn cjk_ideographs(catcode: CatCode) -> Self {
+        const CJK_LEN: usize = get_cjk_ideographs_blocks().len();
+        let mut chars: Vec<NumberSpan<char>> = Vec::with_capacity(CJK_LEN);
+        let catcodes = Vec::from_iter([catcode; CJK_LEN]);
+        unsafe {
+            for block in get_cjk_ideographs_blocks() {
+                let start = char::from_u32_unchecked(block[0]);
+                let end = char::from_u32_unchecked(block[1]);
+                chars.push((start..=end).into());
+            }
+        }
+        chars.sort_by_key(|ns| ns.start()); // may not be sorted!
+        Self {
+            chars,
+            catcodes,
+            escape: '\\' as u32,
+            endline: '\x0D' as u32,
+        }
+    }
+
     pub fn binary_search(&self, item: char) -> Result<usize, usize> {
         self.chars.binary_search_by(|v| v.cmp(&item))
     }
@@ -59,6 +106,33 @@ impl CTab {
     }
     pub fn set(&mut self, item: char, catcode: CatCode) {
         self.emplace_item(NumberSpan::from(item), catcode);
+    }
+    pub fn remove(&mut self, item: char) -> Option<CatCode> {
+        match self.binary_search(item) {
+            Ok(index) => unsafe {
+                let (start, end) = {
+                    let s = self.chars.get_unchecked(index);
+                    (s.start(), s.end())
+                };
+                if start == end {
+                    self.chars.remove(index);
+                    Some(self.catcodes.remove(index))
+                } else {
+                    if item == start {
+                        self.chars[index] = (Step::forward_unchecked(start, 1)..=end).into();
+                    } else if item == end {
+                        self.chars[index] = (start..=Step::backward_unchecked(end, 1)).into();
+                    } else {
+                        self.catcodes.insert(index, self.catcodes[index]);
+                        self.chars[index] = (Step::forward_unchecked(item, 1)..=end).into();
+                        self.chars
+                            .insert(index, (start..=Step::backward_unchecked(item, 1)).into());
+                    }
+                    Some(*self.catcodes.get_unchecked(index))
+                }
+            },
+            Err(_) => None,
+        }
     }
     pub fn get_escape_char(&self) -> Option<char> {
         unsafe {
@@ -408,7 +482,7 @@ impl CTabSet {
                 ('\x21'..=char::MAX, CatCode::Other),
             ])
         };
-        ctabs.insert(String::from("other"), Rc::new(RefCell::new(ctab)));
+        ctabs.insert(String::from("str"), Rc::new(RefCell::new(ctab)));
         CTabSet { ctabs }
     }
 
@@ -429,6 +503,38 @@ impl CTabSet {
         self.ctabs
             .insert(name.to_string(), Rc::new(RefCell::new(ctab)));
         true
+    }
+    /// Put but detect special cases, for special cases, return false.
+    /// name = other, ctab = empty, all char = CatCode::Other;
+    /// name = CJK, ctab = empty, => ALL CJK IDEOGRAPHS = catcode;
+    pub fn put_detect_specials(&mut self, name: &str, ctab: CTab, catcode: CatCode) -> bool {
+        if matches!(name, "other" | "current") {
+            return false;
+        }
+        match name {
+            "other" => {
+                let mut new_ctab = CTab::new();
+                new_ctab.emplace_item(char::MIN..=char::MAX, CatCode::Other);
+                new_ctab.escape = ctab.escape;
+                new_ctab.endline = ctab.endline;
+                self.ctabs
+                    .insert(name.to_string(), Rc::new(RefCell::new(new_ctab)));
+                false
+            }
+            "CJK" if ctab.is_empty() => {
+                let mut new_ctab = CTab::cjk_ideographs(catcode);
+                new_ctab.escape = ctab.escape;
+                new_ctab.endline = ctab.endline;
+                self.ctabs
+                    .insert(name.to_string(), Rc::new(RefCell::new(new_ctab)));
+                false
+            }
+            _ => {
+                self.ctabs
+                    .insert(name.to_string(), Rc::new(RefCell::new(ctab)));
+                true
+            }
+        }
     }
 
     // Clone and return the pointer of ctabs[name].
@@ -693,7 +799,10 @@ impl CTabSet {
                             } else {
                                 key_o = match parse_num_range(&key_str, "..") {
                                     Ok(v) => v.try_into().ok(),
-                                    Err(_) => None,
+                                    Err(_) => match get_from_block(&key_str) {
+                                        Some(v) => Some(v),
+                                        None => None,
+                                    },
                                 };
                                 if key_o.is_some() {
                                     match CatCode::try_from(&val_str) {
@@ -737,7 +846,10 @@ impl CTabSet {
         if !key_str.is_empty() {
             key_o = match parse_num_range(&key_str, "..") {
                 Ok(v) => v.try_into().ok(),
-                Err(_) => None,
+                Err(_) => match get_from_block(&key_str) {
+                    Some(v) => Some(v),
+                    None => None,
+                },
             };
         }
         if key_o.is_some() {
@@ -763,9 +875,9 @@ impl CTabSet {
             ignored_lines += 1;
         }
         if ignored_lines > 0 {
-            warn!(target: "Parsing CTabSet", ">>--- Ignoring {} line(s) ---<<", ignored_lines);
+            warn!(target: "Parsing CTabSet", "Ignoring {} line(s).", ignored_lines);
         } else {
-            info!(target: "Parsing CTabSet", ">>--- Ignoring {} line(s) ---<<", ignored_lines);
+            info!(target: "Parsing CTabSet", "Ignoring {} line(s).", ignored_lines);
         }
         Ok(ctabset)
     }
@@ -954,18 +1066,48 @@ pub trait CatCodeGetter {
     fn escape_char(&self) -> Option<char>;
     fn endline_char(&self) -> Option<char>;
 }
-
-pub struct CTabFallbackable<'a, T: CatCodeGetter> {
-    ctab: T,
-    fallback: Option<Box<&'a dyn CatCodeGetter>>,
-}
-
-impl<'a1, T: CatCodeGetter> CTabFallbackable<'a1, T> {
-    pub fn new<'a: 'a1>(ctab: T, fallback: Option<Box<&'a dyn CatCodeGetter>>) -> Self {
-        CTabFallbackable::<'a1> { ctab, fallback }
+impl<C: CatCodeGetter, T: Deref<Target = C>> CatCodeGetter for T {
+    fn catcode_value(&self, at: char) -> Option<CatCode> {
+        self.deref().catcode_value(at)
+    }
+    fn escape_char(&self) -> Option<char> {
+        self.deref().escape_char()
+    }
+    fn endline_char(&self) -> Option<char> {
+        self.deref().endline_char()
     }
 }
 
+pub struct CTabFallbackable<T1: CatCodeGetter, T2: CatCodeGetter> {
+    ctab: T1,
+    fallback: Option<T2>,
+}
+
+impl<T1: CatCodeGetter, T2: CatCodeGetter> CTabFallbackable<T1, T2> {
+    pub fn new(ctab: T1, fallback: Option<T2>) -> Self {
+        CTabFallbackable { ctab, fallback }
+    }
+    /// Return fallback.
+    pub fn pop(self) -> Option<T2> {
+        self.fallback
+    }
+}
+
+impl CatCodeGetter for Character {
+    fn catcode_value(&self, at: char) -> Option<CatCode> {
+        if self.charcode == at {
+            Some(self.catcode)
+        } else {
+            None
+        }
+    }
+    fn escape_char(&self) -> Option<char> {
+        None
+    }
+    fn endline_char(&self) -> Option<char> {
+        None
+    }
+}
 impl CatCodeGetter for CTab {
     fn catcode_value(&self, at: char) -> Option<CatCode> {
         self.get(at)
@@ -977,29 +1119,7 @@ impl CatCodeGetter for CTab {
         self.get_endline_char()
     }
 }
-impl CatCodeGetter for Ref<'_, CTab> {
-    fn catcode_value(&self, at: char) -> Option<CatCode> {
-        self.get(at)
-    }
-    fn escape_char(&self) -> Option<char> {
-        self.get_escape_char()
-    }
-    fn endline_char(&self) -> Option<char> {
-        self.get_endline_char()
-    }
-}
-impl CatCodeGetter for RefMut<'_, CTab> {
-    fn catcode_value(&self, at: char) -> Option<CatCode> {
-        self.get(at)
-    }
-    fn escape_char(&self) -> Option<char> {
-        self.get_escape_char()
-    }
-    fn endline_char(&self) -> Option<char> {
-        self.get_endline_char()
-    }
-}
-impl<'a, T: CatCodeGetter> CatCodeGetter for CTabFallbackable<'a, T> {
+impl<T1: CatCodeGetter, T2: CatCodeGetter> CatCodeGetter for CTabFallbackable<T1, T2> {
     fn catcode_value(&self, at: char) -> Option<CatCode> {
         match self.ctab.catcode_value(at) {
             Some(value) => Some(value),
@@ -1018,8 +1138,163 @@ impl<'a, T: CatCodeGetter> CatCodeGetter for CTabFallbackable<'a, T> {
     }
 }
 
+pub enum CatcodeStackItem<'a> {
+    Char((char, CatCode)),
+    CTab(CTab),
+    CTabRef(Ref<'a, CTab>),
+    CTabRefMut(RefMut<'a, CTab>),
+}
+impl From<CTab> for CatcodeStackItem<'_> {
+    fn from(value: CTab) -> Self {
+        CatcodeStackItem::CTab(value)
+    }
+}
+impl<'a, 'b: 'a> From<Ref<'b, CTab>> for CatcodeStackItem<'a> {
+    fn from(value: Ref<'b, CTab>) -> Self {
+        CatcodeStackItem::CTabRef(value)
+    }
+}
+impl<'a, 'b: 'a> From<RefMut<'b, CTab>> for CatcodeStackItem<'a> {
+    fn from(value: RefMut<'b, CTab>) -> Self {
+        CatcodeStackItem::CTabRefMut(value)
+    }
+}
+impl From<(char, CatCode)> for CatcodeStackItem<'_> {
+    fn from(value: (char, CatCode)) -> Self {
+        CatcodeStackItem::Char(value)
+    }
+}
+impl CatCodeGetter for CatcodeStackItem<'_> {
+    fn catcode_value(&self, at: char) -> Option<CatCode> {
+        match self {
+            Self::Char((c, v)) => (*c == at).then(|| *v),
+            Self::CTab(c) => c.get(at),
+            Self::CTabRef(c) => c.get(at),
+            Self::CTabRefMut(c) => c.get(at),
+        }
+    }
+    fn escape_char(&self) -> Option<char> {
+        match self {
+            Self::Char(_) => None,
+            Self::CTab(c) => c.get_escape_char(),
+            Self::CTabRef(c) => c.get_escape_char(),
+            Self::CTabRefMut(c) => c.get_escape_char(),
+        }
+    }
+    fn endline_char(&self) -> Option<char> {
+        match self {
+            Self::Char(_) => None,
+            Self::CTab(c) => c.get_endline_char(),
+            Self::CTabRef(c) => c.get_endline_char(),
+            Self::CTabRefMut(c) => c.get_endline_char(),
+        }
+    }
+}
+
+pub struct CatcodeStack<'a> {
+    data: Vec<CatcodeStackItem<'a>>,
+}
+impl<'a> CatcodeStack<'a> {
+    pub fn new() -> Self {
+        Self { data: Vec::new() }
+    }
+    pub fn push<'b: 'a, T: Into<CatcodeStackItem<'a>>>(&mut self, item: T) -> &CatcodeStackItem {
+        let index = self.len();
+        self.data.push(item.into());
+        unsafe { self.data.get_unchecked(index) }
+        // unsafe { self.data.as_ptr().offset(index as isize) }
+    }
+    pub fn pop(&mut self) -> Option<CatcodeStackItem> {
+        self.data.pop()
+    }
+    pub fn remove(&mut self, index: usize) -> CatcodeStackItem {
+        self.data.remove(index)
+    }
+    pub fn remove_of(&mut self, item: &CatcodeStackItem) -> Option<CatcodeStackItem> {
+        if self.len() > 0 {
+            unsafe {
+                let item = item as *const CatcodeStackItem;
+                assert!(
+                    item >= self.data.as_ptr()
+                        && item <= self.data.get_unchecked(self.data.len() - 1)
+                );
+                let offset = item.offset_from(self.data.as_ptr()) as usize;
+                Some(self.data.remove(offset))
+            }
+        } else {
+            None
+        }
+    }
+    pub fn len(&self) -> usize {
+        self.data.len()
+    }
+}
+impl<'a> Index<usize> for CatcodeStack<'a> {
+    type Output = CatcodeStackItem<'a>;
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.data[index]
+    }
+}
+impl<'a> IndexMut<usize> for CatcodeStack<'a> {
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+        &mut self.data[index]
+    }
+}
+impl CatCodeGetter for CatcodeStack<'_> {
+    fn catcode_value(&self, at: char) -> Option<CatCode> {
+        let mut iter = (0..self.len()).into_iter();
+        while let Some(index) = iter.next_back() {
+            match unsafe { self.data.get_unchecked(index) } {
+                CatcodeStackItem::Char((c, v)) => {
+                    if *c == at {
+                        return Some(*v);
+                    }
+                }
+                CatcodeStackItem::CTab(ctab) => match ctab.get(at) {
+                    Some(cat) => return Some(cat),
+                    None => continue,
+                },
+                CatcodeStackItem::CTabRef(ctab) => match ctab.get(at) {
+                    Some(cat) => return Some(cat),
+                    None => continue,
+                },
+                CatcodeStackItem::CTabRefMut(ctab) => match ctab.get(at) {
+                    Some(cat) => return Some(cat),
+                    None => continue,
+                },
+            }
+        }
+        None
+    }
+    fn escape_char(&self) -> Option<char> {
+        let mut iter = (0..self.len()).into_iter();
+        while let Some(index) = iter.next_back() {
+            match unsafe { self.data.get_unchecked(index) } {
+                CatcodeStackItem::Char(_) => continue,
+                CatcodeStackItem::CTab(ctab) => return ctab.get_escape_char(),
+                CatcodeStackItem::CTabRef(ctab) => return ctab.get_escape_char(),
+                CatcodeStackItem::CTabRefMut(ctab) => return ctab.get_escape_char(),
+            }
+        }
+        None
+    }
+    fn endline_char(&self) -> Option<char> {
+        let mut iter = (0..self.len()).into_iter();
+        while let Some(index) = iter.next_back() {
+            match unsafe { self.data.get_unchecked(index) } {
+                CatcodeStackItem::Char(_) => continue,
+                CatcodeStackItem::CTab(ctab) => return ctab.get_endline_char(),
+                CatcodeStackItem::CTabRef(ctab) => return ctab.get_endline_char(),
+                CatcodeStackItem::CTabRefMut(ctab) => return ctab.get_endline_char(),
+            }
+        }
+        None
+    }
+}
+
 pub struct ControlSequence {
     csname: String,
+    pub escape_char: Option<char>,
 }
 impl Debug for ControlSequence {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -1050,6 +1325,7 @@ impl ControlSequence {
         } else {
             ControlSequence {
                 csname: format!("{}{}", '\x00', s.as_ref()),
+                escape_char: None,
             }
         }
     }
@@ -1060,6 +1336,7 @@ impl ControlSequence {
         } else {
             ControlSequence {
                 csname: format!("{}{}", '\x01', s),
+                escape_char: None,
             }
         }
     }
@@ -1067,10 +1344,18 @@ impl ControlSequence {
     pub fn new_csp() -> Self {
         ControlSequence {
             csname: "\x02 ".to_string(),
+            escape_char: None,
         }
+    }
+    pub fn with_escaped_char(mut self, escaped_char: char) -> Self {
+        self.escape_char = Some(escaped_char);
+        self
     }
     pub fn get_csname(&self) -> &str {
         unsafe { self.csname.get_unchecked(1..self.csname.len()) }
+    }
+    pub fn get_csname_escaped(&self, e: u8) -> String {
+        escape_string(self.get_csname(), e)
     }
     pub fn cs_with_escape_char(&self, escape_char: Option<char>) -> String {
         match escape_char {
@@ -1084,6 +1369,7 @@ impl ControlSequence {
         escape_char: Option<char>,
         stream: &mut T,
     ) -> io::Result<()> {
+        let escape_char = self.escape_char.or(escape_char);
         match escape_char {
             Some(chr) => write!(stream, "{}", chr)?,
             _ => {}
@@ -1099,10 +1385,29 @@ impl Hash for ControlSequence {
     }
 }
 
+pub fn escape_string(s: &str, e: u8) -> String {
+    let mut v = vec![];
+    for c in s.chars() {
+        if c.is_alphanumeric() {
+            v.push(format!("{}", c));
+        } else if c.is_control() {
+            v.push(escape_string(&escape_control(c, e), e));
+        } else {
+            v.push(format!("\"{:X} ", c as u32));
+        }
+    }
+    v.concat()
+}
+
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub struct Character {
-    charcode: char,
-    catcode: CatCode,
+    pub charcode: char,
+    pub catcode: CatCode,
+}
+impl From<(char, CatCode)> for Character {
+    fn from(value: (char, CatCode)) -> Self {
+        Self::new(value.0, value.1)
+    }
 }
 
 impl Character {
@@ -1118,6 +1423,9 @@ impl Character {
     pub fn get_pairs(&self) -> (char, CatCode) {
         (self.charcode, self.catcode)
     }
+    pub fn is_punct(&self) -> bool {
+        self.charcode.general_category_group() == GeneralCategoryGroup::Punctuation
+    }
     pub unsafe fn write<T: io::Write>(&self, stream: &mut T) -> io::Result<()> {
         if self.charcode == '\r' {
             write!(stream, "\n")?;
@@ -1125,6 +1433,53 @@ impl Character {
             write!(stream, "{}", self.charcode)?;
         }
         Ok(())
+    }
+    /// Transform ASCII control symbol to `^^.` form.
+    pub fn escape_ascii_control(&self) -> Option<u8> {
+        let chr = self.charcode as u32;
+        if chr > 0x7F {
+            return None;
+        }
+        if chr == 0x7F {
+            return Some(63);
+        }
+        if chr < 0x20 {
+            return Some(chr as u8 + 0x40);
+        }
+        return None;
+    }
+    /// Transform control symbol to `^^.` or `^^^^....` or `^^^^^^......` form.
+    pub fn escape_control(&self, e: u8) -> String {
+        if self.charcode.is_control() {
+            escape_control(self.charcode, e)
+        } else {
+            format!("{}", self.charcode)
+        }
+    }
+}
+
+pub fn escape_control(c: char, e: u8) -> String {
+    let e_chr = e as char;
+    assert!(
+        !e_chr.is_ascii_control(),
+        "Cannot be an ASCII control character."
+    );
+    match c {
+        '\0'..'\x20' => {
+            format!("{e_chr}{e_chr}{}", (c as u8 + 0x40) as char)
+        }
+        '\x7f' => {
+            format!("{e_chr}{e_chr}{}", '\x3f')
+        }
+        _ => {
+            if c <= 255 as char {
+                format!("{e_chr}{e_chr}{:02x}", c as u8)
+            } else if c <= '\u{ffff}' {
+                format!("{e_chr}{e_chr}{e_chr}{e_chr}{:04x}", c as u32)
+            } else {
+                format!("{e_chr}{e_chr}{e_chr}{e_chr}{e_chr}{e_chr}{:06x}", c as u32)
+            }
+        }
     }
 }
 
@@ -1211,26 +1566,39 @@ impl TokenList {
         let mut res = Vec::new();
 
         let mut cs_name = String::new();
+        let mut escaped_char = '\0';
         let mut collect_cs = false;
 
         while let Some(chr) = source.next() {
             let cat = catcode.catcode_value(chr).unwrap_or_default();
+            let chr = if cat == CatCode::Superscript {
+                let (chr, n) = circumflex_mechanism(catcode, source.clone(), chr);
+                source.advance_by(n).unwrap();
+                chr
+            } else {
+                chr
+            };
             if collect_cs {
                 if cat == CatCode::Letter {
                     cs_name.push(chr);
                     continue;
                 } else if cs_name.is_empty() {
-                    res.push(Token::CS(ControlSequence::new_csy(chr)));
+                    res.push(Token::CS(
+                        ControlSequence::new_csy(chr).with_escaped_char(escaped_char),
+                    ));
                     collect_cs = false;
                     continue;
                 } else {
-                    res.push(Token::CS(ControlSequence::new_cwo(&cs_name)));
+                    res.push(Token::CS(
+                        ControlSequence::new_cwo(&cs_name).with_escaped_char(escaped_char),
+                    ));
                     cs_name.clear();
                     collect_cs = false;
                 }
             }
             if cat == CatCode::Escape {
                 collect_cs = true;
+                escaped_char = chr;
             } else {
                 res.push(Token::Char(Character::new(chr, cat)));
             }
@@ -1239,11 +1607,17 @@ impl TokenList {
             let i_from = cs_name.floor_char_boundary(cs_name.len() - 1);
             let last_char = cs_name[i_from..cs_name.len()].chars().next().unwrap();
             if last_char == ' ' && cs_name.len() == 1 {
-                res.push(Token::CS(ControlSequence::new_csp()));
+                res.push(Token::CS(
+                    ControlSequence::new_csp().with_escaped_char(escaped_char),
+                ));
             } else if catcode.catcode_value(last_char) == Some(CatCode::Letter) {
-                res.push(Token::CS(ControlSequence::new_cwo(&cs_name)));
+                res.push(Token::CS(
+                    ControlSequence::new_cwo(&cs_name).with_escaped_char(escaped_char),
+                ));
             } else {
-                res.push(Token::CS(ControlSequence::new_csy(last_char)));
+                res.push(Token::CS(
+                    ControlSequence::new_csy(last_char).with_escaped_char(escaped_char),
+                ));
             }
             cs_name.clear();
         }
@@ -1256,6 +1630,119 @@ impl IntoIterator for TokenList {
     fn into_iter(self) -> Self::IntoIter {
         self.values.into_iter()
     }
+}
+
+pub struct TokenListWithRaw {
+    tokenlist: TokenList,
+    raw: Vec<String>,
+}
+pub struct TokenListWithRawIter<'a> {
+    token: std::slice::Iter<'a, Token>,
+    raw: std::slice::Iter<'a, String>,
+}
+impl<'a> Iterator for TokenListWithRawIter<'a> {
+    type Item = (&'a Token, &'a String);
+    fn next(&mut self) -> Option<Self::Item> {
+        match (self.token.next(), self.raw.next()) {
+            (Some(t), Some(r)) => Some((t, r)),
+            _ => None,
+        }
+    }
+}
+impl TokenListWithRaw {
+    pub fn iter(&self) -> TokenListWithRawIter {
+        TokenListWithRawIter {
+            token: self.tokenlist.iter(),
+            raw: self.raw.iter(),
+        }
+    }
+    pub fn tokens(&self) -> &TokenList {
+        &self.tokenlist
+    }
+    pub fn raws(&self) -> &Vec<String> {
+        &self.raw
+    }
+}
+
+fn circumflex_mechanism<C: CatCodeGetter>(
+    catcode: &C,
+    mut chars: Chars,
+    mut chr: char,
+) -> (char, usize) {
+    let mut advance = 1;
+    let mut last_char = None;
+
+    fn more1(chr: &mut char, advance: &mut usize) {
+        if matches!(chr, '0'..='9' | 'a'..='z') {
+            *chr = char::from_u32(u32::from_str_radix(&format!("{}{}", *chr, *chr), 16).unwrap())
+                .unwrap();
+            *advance = 3;
+        } else if (*chr as u32) < 128 {
+            *chr = if (*chr as u8) < 64 {
+                ((*chr as u8) + 0o100) as char
+            } else {
+                ((*chr as u8) - 0o100) as char
+            };
+            *advance = 2;
+        } else {
+            *advance = 0;
+        }
+    }
+    fn more2(chr: &mut char, c1: char, c2: Option<char>, advance: &mut usize) {
+        if matches!(c1, '0'..='9' | 'a'..='f') {
+            match c2 {
+                Some(c2) if matches!(c2, '0'..='9' | 'a'..='f') => {
+                    *chr =
+                        char::from_u32(u32::from_str_radix(&format!("{}{}", c1, c2), 16).unwrap())
+                            .unwrap();
+                    *advance = 3;
+                }
+                _ => {
+                    *chr = if (c1 as u32) < 64 {
+                        ((c1 as u8) + 0o100) as char
+                    } else {
+                        ((c1 as u8) - 0o100) as char
+                    };
+                    *advance = 2;
+                }
+            }
+        } else if (c1 as u32) < 128 {
+            *chr = if (c1 as u8) < 64 {
+                ((c1 as u8) + 0o100) as char
+            } else {
+                ((c1 as u8) - 0o100) as char
+            };
+            *advance = 2;
+        } else {
+            *advance = 0;
+        }
+    }
+
+    while let Some(next_char) = chars.next() {
+        if next_char == chr && catcode.catcode_value(chr) == Some(CatCode::Superscript) {
+            advance += 1;
+            if advance > 4 {
+                last_char = Some(next_char);
+                break;
+            }
+        } else {
+            last_char = Some(next_char);
+            break;
+        }
+    }
+    match advance {
+        0 | 1 => return (chr, 0),
+        2 => match last_char {
+            Some(last_char) => more2(&mut chr, last_char, chars.next(), &mut advance),
+            None => advance = 0,
+        },
+        3 => {
+            let c1 = chr;
+            more2(&mut chr, c1, last_char, &mut advance)
+        }
+        _ => more1(&mut chr, &mut advance),
+    }
+    (chr, advance)
 }
 
 #[cfg(test)]
@@ -1577,6 +2064,28 @@ mod tests {
             &ctab.catcodes,
             &vec![Parameter, Other, Letter, Other, Letter, Active, Other]
         );
+
+        assert_eq!(ctab.remove('?'), None);
+        assert_eq!(ctab.remove('#'), Some(Parameter));
+        assert_eq!(ctab.remove('\u{2000}'), Some(Other));
+        assert_eq!(ctab.remove('\u{8FFF}'), Some(Letter));
+        assert_eq!(ctab.remove('\u{9500}'), Some(Active));
+        assert_eq!(
+            &ctab.chars,
+            &vec![
+                NumberSpan::from('0'..='9'),
+                NumberSpan::from('A'..='z'),
+                NumberSpan::from('\u{2001}'..='\u{5000}'),
+                NumberSpan::from('\u{5001}'..='\u{8FFE}'),
+                NumberSpan::from('\u{9000}'..='\u{94FF}'),
+                NumberSpan::from('\u{9501}'..='\u{10000}'),
+                NumberSpan::from('\u{10001}'..='\u{10FFFF}')
+            ]
+        );
+        assert_eq!(
+            &ctab.catcodes,
+            &vec![Other, Letter, Other, Letter, Active, Active, Other]
+        );
     }
 
     #[test]
@@ -1605,6 +2114,10 @@ mod tests {
         [empty]
         endlinechar=`\\
         escapechar=`\ 
+        [cjk]
+        UNKNOWN = 11
+        CJK_UNIFIED_IDEOGRAPHS_EXTENSION_A = 11
+        CJK_UNIFIED_IDEOGRAPHS = 11
         "#;
         let ctabset = CTabSet::from_str(&ctabset_str).unwrap();
         let ctab_main = ctabset.get_by_name("main").unwrap();
@@ -1641,6 +2154,12 @@ mod tests {
         assert_eq!(ctabset.get_escape_char("error"), Some('\\'));
         assert_eq!(ctabset.get_escape_char("empty"), Some(' '));
         assert_eq!(ctabset.get_endline_char("empty"), Some('\\'));
+
+        let ctab_cjk = ctabset.get_by_name("cjk").unwrap();
+        assert_eq!(ctab_cjk.get('\u{4E00}'), Some(Letter));
+        assert_eq!(ctab_cjk.get('\u{3400}'), Some(Letter));
+        assert_eq!(ctab_cjk.get('\u{20794}'), None);
+        assert_eq!(ctab_cjk.get('\x20'), None);
     }
 
     #[test]
@@ -1649,7 +2168,7 @@ mod tests {
         let ctabset = CTabSet::from_str(
             r#"
         [initex]
-        10 = 5  /* <return> */
+        13 = 5  /* <return> */
         32 = 10 /* <space> */
         0  = 9  /* <null> */
         16 = 15 /* <delete> */
@@ -1670,28 +2189,60 @@ mod tests {
         `\: =11
         `\_ =11
         `\  =9
+        `\~ =10
         "#,
         )
         .unwrap();
 
+        let cjk = RefCell::new(CTab::cjk_ideographs(Letter));
+
         assert_eq!(ctabset.get_escape_char("initex"), Some('\\'));
         assert_eq!(ctabset.get_endline_char("initex"), Some('\x0D'));
+        {
+            let mut cat_stack = CatcodeStack::new();
+            cat_stack.push(cjk.borrow());
+            cat_stack.push(
+                ctabset
+                    .get_by_name("initex")
+                    .expect("parse error! no [initex]"),
+            );
+            cat_stack.push(
+                ctabset
+                    .get_by_name("latex")
+                    .expect("parse error! no [latex]"),
+            );
+            cat_stack.push(
+                ctabset
+                    .get_by_name("latex3")
+                    .expect("parse error! no [latex3]"),
+            );
+            assert_eq!(cat_stack.catcode_value('_'), Some(Letter));
+            assert_eq!(cat_stack.catcode_value(' '), Some(Ignored));
+            assert_eq!(cat_stack.catcode_value('\u{4E00}'), Some(Letter)); // CJK_UNIFIED_IDEOGRAPHS
+            assert_eq!(cat_stack.catcode_value('\u{3400}'), Some(Letter)); // CJK_UNIFIED_IDEOGRAPHS_EXTENSION_A
+            assert_eq!(cat_stack.catcode_value('\u{20000}'), Some(Letter)); // CJK_UNIFIED_IDEOGRAPHS_EXTENSION_B
+            assert_eq!(cat_stack.catcode_value('\u{2A700}'), Some(Letter)); // CJK_UNIFIED_IDEOGRAPHS_EXTENSION_C
+            assert_eq!(cat_stack.catcode_value('\u{2B740}'), Some(Letter)); // CJK_UNIFIED_IDEOGRAPHS_EXTENSION_D
+            assert_eq!(cat_stack.catcode_value('\u{2B820}'), Some(Letter)); // CJK_UNIFIED_IDEOGRAPHS_EXTENSION_E
+            assert_eq!(cat_stack.catcode_value('\u{2CEB0}'), Some(Letter)); // CJK_UNIFIED_IDEOGRAPHS_EXTENSION_F
+            assert_eq!(cat_stack.catcode_value('\u{30000}'), Some(Letter)); // CJK_UNIFIED_IDEOGRAPHS_EXTENSION_G
+            assert_eq!(cat_stack.catcode_value('\u{31350}'), Some(Letter)); // CJK_UNIFIED_IDEOGRAPHS_EXTENSION_H
+            assert_eq!(cat_stack.catcode_value('\u{2EBF0}'), Some(Letter)); // CJK_UNIFIED_IDEOGRAPHS_EXTENSION_I
+            assert_eq!(cat_stack.catcode_value('\u{F900}'), Some(Letter)); // CJK_COMPATIBILITY_IDEOGRAPHS
+            assert_eq!(cat_stack.catcode_value('\u{2F800}'), Some(Letter)); // CJK_COMPATIBILITY_IDEOGRAPHS_SUPPLEMENT
+
+            assert_eq!(cat_stack[3].catcode_value('_'), Some(Letter));
+        }
 
         {
-            let initex = ctabset
-                .get_by_name_mut("initex")
-                .expect("parse error! no [initex]");
-            let latex = ctabset
-                .get_by_name("latex")
-                .expect("parse error! no [latex]");
-            let latex3 = ctabset
-                .get_by_name("latex3")
-                .expect("parse error! no [latex3]");
-            let initex_fb = CTabFallbackable::new(initex, None);
-            let latex_fb = CTabFallbackable::new(latex, Some(Box::new(&initex_fb)));
-            let latex3_fb = CTabFallbackable::new(latex3, Some(Box::new(&latex_fb)));
+            let initex = ctabset.get_by_name("initex").unwrap();
+            let latex = ctabset.get_by_name("latex").unwrap();
+            let latex3 = ctabset.get_by_name("latex3").unwrap();
+            let initex_fb = CTabFallbackable::new(initex, Option::<Character>::None);
+            let latex_fb = CTabFallbackable::new(latex, Some(&initex_fb));
+            let latex3_fb = CTabFallbackable::new(latex3, Some(&latex_fb));
 
-            assert_eq!(initex_fb.catcode_value('\n'), Some(EndLine));
+            assert_eq!(initex_fb.catcode_value('\r'), Some(EndLine));
             assert_eq!(initex_fb.catcode_value(' '), Some(Space));
             assert_eq!(initex_fb.catcode_value('\0'), Some(Ignored));
             assert_eq!(initex_fb.catcode_value('\x10'), Some(Invalid));
@@ -1712,7 +2263,7 @@ mod tests {
             assert_eq!(latex_fb.catcode_value('~'), Some(Active));
             assert_eq!(latex_fb.catcode_value(':'), None);
             assert_eq!(latex_fb.catcode_value('a'), Some(Letter));
-            assert_eq!(latex_fb.catcode_value('\n'), Some(EndLine));
+            assert_eq!(latex_fb.catcode_value('\r'), Some(EndLine));
             assert_eq!(latex_fb.catcode_value(' '), Some(Space));
 
             assert_eq!(latex3_fb.catcode_value(':'), Some(Letter));

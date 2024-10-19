@@ -1,0 +1,29 @@
+gobble = 0
+break_after = [' ', "\t"]
+break_indent = 2
+tab_to_spaces = true
+tabs_len = 2
+replace_space = false
+replace_tab = false
+lines = [0, 0]
+
+[ranges]
+
+[cs_categories]
+'latex.document' = ["DocumentMetadata", "documentclass", "documentstyle", "begin", "end", "usepackage", "title", "author", "date", "thanks", "maketitle",
+    "frontmatter", "mainmatter", "backmatter", "tableofcontents", "listoffigures", "listoftables", "appendix", "input", "include", "includeonly", 
+    "part", "chapter", "section", "subsection", "subsubsection", "subsubsection", "paragraph", "subparagraph",
+    "thepart", "thechapter", "thesection", "thesubsection", "thesubsubsection", "thesubsubsection", "theparagraph", "thesubparagraph",
+    "abstractname", "appendixname", "bibname", "chaptername", "contentsname", "indexname", "listfigurename", "listtablename", "partname", "refname",
+    "clearpage", "cleardoublepage", "pagenumbering", "makeindex", "index", "label", "ref", "footnote", "footnotetext", "footnotemark", 
+    "par", "newcounter", "counterwithin", "counterwithout", "hspace", "enspace", "quad", "qquad", "hrulefill", "dotfill",
+    "vspace", "smallskip", "medskip", "bigskip", "addvspace", "addpenalty", "newline",
+    "rule", "mbox", "makebox", "parbox", "fbox", "framebox", "raisebox",
+]
+'latex.programming' = ["makeatletter", "makeatother", "newcommand", "renewcommand", "providecommand", "newenvironment", "renewenvironment",
+    "setlength", "addtolength", "settowidth", "settoheight", "settodepth", "newlength", "newcounter", 
+    "fpeval", "inteval", "dimeval", "skipeval", ]
+
+[ctabs_fallback]
+'cjk' = ['latex']
+'cjkl3' = ['latex3']

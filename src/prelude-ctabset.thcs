@@ -1,0 +1,60 @@
+[initex]
+13 = 5  /* <return> */
+32 = 10 /* <space> */
+0  = 9  /* <null> */
+16 = 15 /* <delete> */
+`A..`Z=11
+`a..`z=11
+`\% =14
+`\\ =0
+
+[latex]
+`\\ = 0
+`\{ = 1
+`\} = 2
+`\$ = 3
+`\& = 4
+13  = 5
+`\# = 6
+`\^ = 7
+`\_ = 8
+0   = 9
+32  = 10
+`A..`Z=11
+`a..`z=11
+`\~ = 13
+`\% = 14
+16  = 15
+
+[latex3]
+`\\ = 0
+`\{ = 1
+`\} = 2
+`\$ = 3
+`\& = 4
+13  = 5
+`\# = 6
+`\^ = 7
+0   = 9
+32  = 9
+`\_ =11
+`\: =11
+`A..`Z=11
+`a..`z=11
+`\~ = 10
+`\% = 14
+16  = 15
+
+[cjk]
+CJK_UNIFIED_IDEOGRAPHS = 11
+CJK_UNIFIED_IDEOGRAPHS_EXTENSION_A = 11
+CJK_UNIFIED_IDEOGRAPHS_EXTENSION_B = 11
+CJK_UNIFIED_IDEOGRAPHS_EXTENSION_C = 11
+CJK_UNIFIED_IDEOGRAPHS_EXTENSION_D = 11
+CJK_UNIFIED_IDEOGRAPHS_EXTENSION_E = 11
+CJK_UNIFIED_IDEOGRAPHS_EXTENSION_F = 11
+CJK_UNIFIED_IDEOGRAPHS_EXTENSION_G = 11
+CJK_UNIFIED_IDEOGRAPHS_EXTENSION_H = 11
+CJK_UNIFIED_IDEOGRAPHS_EXTENSION_I = 11
+CJK_COMPATIBILITY_IDEOGRAPHS = 11
+CJK_COMPATIBILITY_IDEOGRAPHS_SUPPLEMENT = 11
