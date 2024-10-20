@@ -9,7 +9,7 @@ csname_l3_func_pub = @{
     letter_any+ ~ underscore* ~ !(underscore) ~ (underscore | letter_any)* ~ collon ~ (collon | underscore | letter_any)*
 }
 csname_l3_func_internal = @{
-    letter_any+ ~ underscore{2} ~ (underscore | letter_any)* ~ collon ~ (collon | underscore | letter_any)*
+    underscore{2} ~ (underscore | letter_any)* ~ collon ~ (collon | underscore | letter_any)*
 }
 csname_l3_func_kernel = @{
     underscore{2} ~ "kernel" ~ underscore ~ (underscore | letter_any)* ~ collon ~ (collon | underscore | letter_any)*

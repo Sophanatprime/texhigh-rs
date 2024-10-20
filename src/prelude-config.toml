@@ -1,5 +1,5 @@
 gobble = 0
-break_after = [' ', "\t"]
+break_at = [' ', "\t"]
 break_indent = 2
 tab_to_spaces = true
 tabs_len = 2

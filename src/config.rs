@@ -1,3 +1,4 @@
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 use std::collections::{HashMap, HashSet};
@@ -5,7 +6,6 @@ use std::fmt::Display;
 use std::path::Path;
 use std::str::FromStr;
 use std::{fs, io};
-use regex::Regex;
 
 use crate::types::{CTabSet, ErrorKind};
 
@@ -69,7 +69,7 @@ impl Default for CSCategories {
 #[derive(Debug, Deserialize, Serialize)]
 pub struct HighConfig {
     pub gobble: u16,
-    pub break_after: BreakAfterType,
+    pub break_at: BreakAfterType,
     pub break_indent: u16,
     pub tab_to_spaces: bool,
     pub tabs_len: u16,
@@ -87,7 +87,7 @@ impl Default for HighConfig {
     fn default() -> Self {
         HighConfig {
             gobble: 0,
-            break_after: vec![' ', '\t'].into(),
+            break_at: vec![' ', '\t'].into(),
             break_indent: 2,
             tab_to_spaces: true,
             tabs_len: 2,

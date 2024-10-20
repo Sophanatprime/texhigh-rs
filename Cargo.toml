@@ -25,7 +25,3 @@ codepage = "*"
 winapi = { version = "*", features = ["winnls"]}
 unicode-properties = "*"
 unicode-blocks = "*"
-
-[profile.release]
-lto = true
-opt-level = 1

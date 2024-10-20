@@ -15,8 +15,8 @@ pub mod types;
 mod unicode;
 
 const VERSION: i32 = 0;
-const REVERSION: &str = ".1";
-const DATE: &str = "2024/06/15";
+const REVERSION: &str = ".1.1";
+const DATE: &str = "2024/10/20";
 const COPYRIGHT: &str = "2024, Wenjian Chern ©";
 
 pub fn get_matches() -> ArgMatches {
@@ -82,6 +82,13 @@ pub fn get_matches() -> ArgMatches {
                 .conflicts_with("config"),
         )
         .arg(
+            Arg::new("kpse-config-file")
+                .long("kpse-config-file")
+                .alias("kcf")
+                .action(ArgAction::SetTrue)
+                .help("use kpsewhich to search config files."),
+        )
+        .arg(
             Arg::new("text")
                 .long("text")
                 .short('t')
@@ -92,6 +99,7 @@ pub fn get_matches() -> ArgMatches {
             Arg::new("file")
                 .long("file")
                 .short('f')
+                .num_args(1..)
                 .value_name("FILE")
                 .help("file to be highlight")
                 .conflicts_with("text"),
