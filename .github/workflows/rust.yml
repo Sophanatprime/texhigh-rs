@@ -1,67 +1,27 @@
-name: build
 on:
-  workflow_dispatch: {}
+  release:
+    types: [created]
+
 jobs:
-  build:
-    name: build
-    runs-on: ${{ matrix.os }}
+  release:
+    name: release ${{ matrix.target }}
+    runs-on: ubuntu-latest
     strategy:
-      matrix:
-        build: [linux, macos, windows]
-        include:
-          - build: linux
-            os: ubuntu-20.04
-            rust: nightly
-            target: x86_64-unknown-linux-musl
-            archive-name: texhigh-x86_64-unknown-linux-musl.tar.gz
-          - build: macos
-            os: macos-latest
-            rust: nightly
-            target: x86_64-apple-darwin
-            archive-name: texhigh-x86_64-apple-darwin.tar.gz
-          - build: windows
-            os: windows-2019
-            rust: nightly-x86_64-msvc
-            target: x86_64-pc-windows-msvc
-            archive-name: texhigh-x86_64-pc-windows-msvc.7z
       fail-fast: false
-
+      matrix:
+        include:
+          - target: x86_64-pc-windows-gnu
+            archive: zip
+          - target: x86_64-unknown-linux-musl
+            archive: tar.gz tar.xz tar.zst
+          - target: x86_64-apple-darwin
+            archive: zip
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v2
-
-      - name: Install Rust
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: ${{ matrix.rust }}
-          profile: minimal
-          override: true
-          target: ${{ matrix.target }}
-
-      - name: Build binary
-        run: cargo build --verbose --release --target ${{ matrix.target }}
+      - uses: actions/checkout@master
+      - name: Compile and release
+        uses: rust-build/rust-build.action@v1.4.5
         env:
-          RUST_BACKTRACE: 1
-
-      - name: Strip binary (linux and macos)
-        if: matrix.build == 'linux' || matrix.build == 'macos'
-        run: strip "target/${{ matrix.target }}/release/texhigh"
-
-      - name: Build archive
-        shell: bash
-        run: |
-          mkdir archive
-          cp LICENSE README.md archive/
-          cd archive
-          if [ "${{ matrix.build }}" = "windows" ]; then
-            cp "../target/${{ matrix.target }}/release/texhigh.exe" ./
-            7z a "${{ matrix.archive-name }}" LICENSE README.md texhigh.exe
-          else
-            cp "../target/${{ matrix.target }}/release/texhigh" ./
-            tar -czf "${{ matrix.archive-name }}" LICENSE README.md texhigh
-          fi
-      - name: Upload archive
-        uses: actions/upload-artifact@v4
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          name: ${{ matrix.archive-name }}
-          path: archive/${{ matrix.archive-name }}
+          RUSTTARGET: ${{ matrix.target }}
+          ARCHIVE_TYPES: ${{ matrix.archive }}
