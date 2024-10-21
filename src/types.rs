@@ -52,6 +52,7 @@ impl From<fmt::Error> for ErrorKind {
     }
 }
 
+#[derive(Debug)]
 pub struct CTab {
     chars: Vec<NumberSpan<char>>,
     catcodes: Vec<CatCode>,
@@ -378,7 +379,7 @@ impl CTab {
                 }
                 if index < next_index {
                     // index < next_index < len
-                    self.chars[index] = (curr_start..=self.chars[next_index].end()).into();
+                    self.chars[index] = self.chars[next_index].clone();
                     self.catcodes[index] = self.catcodes[next_index];
                 }
             }
@@ -2092,6 +2093,24 @@ mod tests {
     fn ctabset_parse() {
         use CatCode::*;
         let ctabset_str = r#"
+        [latexcode]
+        `\\ = 0
+        `\{ = 1
+        `\} = 2
+        `\$ = 3
+        `\& = 4
+        13  = 5
+        `\# = 6
+        `\^ = 7
+        `\_ = 8
+        0   = 9
+        32  = 10
+        `@  = 11
+        `A..`Z=11
+        `a..`z=11
+        `\~ = 13
+        `\% = 14
+        16  = 15
         [main]
         `a..`z=13 /* cannot be `a .. `z=13 */
         `A..`Z=11
@@ -2132,6 +2151,11 @@ mod tests {
         assert_eq!(ctab_main.get('\u{4E00}').unwrap_or_default(), Letter);
         assert_eq!(ctab_main.get_escape_char(), None);
         assert_eq!(ctab_main.get_endline_char(), None);
+
+        let ctab_latexcode = ctabset.get_by_name("latexcode").unwrap();
+        assert_eq!(ctab_latexcode.get('[').unwrap_or_default(), Other);
+        assert_eq!(ctab_latexcode.get(']').unwrap_or_default(), Other);
+        assert_eq!(ctab_latexcode.get('#').unwrap_or_default(), Parameter);
 
         let ctab_l3 = ctabset.get_by_name("l3").unwrap();
         assert_eq!(ctab_l3.get(' ').unwrap_or_default(), Ignored);

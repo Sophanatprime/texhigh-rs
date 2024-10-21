@@ -69,7 +69,7 @@ impl Default for CSCategories {
 #[derive(Debug, Deserialize, Serialize)]
 pub struct HighConfig {
     pub gobble: u16,
-    pub break_at: BreakAfterType,
+    pub break_at: BreakAtType,
     pub break_indent: u16,
     pub tab_to_spaces: bool,
     pub tabs_len: u16,
@@ -103,10 +103,15 @@ impl Default for HighConfig {
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(transparent)]
-pub struct BreakAfterType(Vec<char>);
-impl From<Vec<char>> for BreakAfterType {
+pub struct BreakAtType(Vec<char>);
+impl BreakAtType {
+    pub fn contains(&self, chr: &char) -> bool {
+        self.0.contains(chr)
+    }
+}
+impl From<Vec<char>> for BreakAtType {
     fn from(value: Vec<char>) -> Self {
-        BreakAfterType(value)
+        BreakAtType(value)
     }
 }
 // #[derive(Debug, Serialize, Deserialize)]

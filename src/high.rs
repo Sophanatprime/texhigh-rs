@@ -155,8 +155,8 @@ pub trait HighFormat {
             format_args!("\\THin{{{}}}", self.get_indent_len(nest)),
         )
     }
-    fn fmt_break<T: HWrite>(&self, stream: &mut T) -> Result<(), ErrorKind> {
-        self.fmt_raw(stream, format_args!("\\THbk"))
+    fn fmt_break<T: HWrite>(&self, stream: &mut T, category: &str) -> Result<(), ErrorKind> {
+        self.fmt_raw(stream, format_args!("\\THbp{{{}}}", category))
     }
     fn fmt_cs<T: HWrite>(&self, stream: &mut T, cs: &ControlSequence) -> Result<(), ErrorKind> {
         // let escape_char = match cs.escape_char {
@@ -319,6 +319,38 @@ impl HighFormat for StandardFormatter<'_> {
         } else {
             "?"
         }
+    }
+    fn fmt_chr<T: HWrite>(&self, stream: &mut T, chr: &Character) -> Result<(), ErrorKind> {
+        if chr.catcode == CatCode::EndLine {
+            self.fmt_newline(stream)
+        } else {
+            if self.high_config.break_at.contains(&chr.charcode) {
+                self.fmt_break(stream, "?")?;
+            }
+            self.fmt_raw(
+                stream,
+                format_args!(
+                    "\\THch{{{}}}{{{}}}",
+                    self.get_chr_catogery(chr),
+                    escape_string(&chr.escape_control(b'^'), b'^')
+                ),
+            )
+        }
+    }
+    fn fmt_cs<T: HWrite>(&self, stream: &mut T, cs: &ControlSequence) -> Result<(), ErrorKind> {
+        self.fmt_break(stream, "?")?;
+        self.fmt_raw(
+            stream,
+            format_args!(
+                "\\THcs{{{}}}{{{}}}{{{}}}",
+                self.get_cs_catogery(cs),
+                escape_string(
+                    &cs.escape_char.map_or("".to_string(), |c| format!("{}", c)),
+                    b'^'
+                ),
+                &cs.get_csname_escaped(b'^')
+            ),
+        )
     }
     #[rustfmt::skip]
     fn fmt_tokenlist<T: HWrite>(
