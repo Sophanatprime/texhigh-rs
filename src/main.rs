@@ -44,7 +44,7 @@ fn main() {
         // We strip exactly one set of ' character.
         let text = m.get_one::<String>("text").unwrap();
         let s_idx = text.starts_with('\'') as usize;
-        let e_idx = text.ends_with('\'') as usize;
+        let e_idx = (s_idx != 0 && text.ends_with('\'')) as usize;
         let text = text[s_idx .. text.len()-e_idx].to_string();
         tokenlist_vec.push((text, false));
     } else if m.contains_id("file") {
@@ -192,10 +192,13 @@ fn get_highconfig(m: &ArgMatches) -> HighConfig {
                 .unwrap()
                 .map(Iterator::collect::<Vec<_>>)
             {
+                let val = *k.get_unchecked(1);
+                let s_idx = val.starts_with("'") as usize;
+                let e_idx = (s_idx != 0 && val.ends_with("'")) as usize;
                 con.push(format!(
-                    "'{}' = \"\"\"{}\"\"\"",
+                    "{} = '''{}'''",
                     k.get_unchecked(0),
-                    k.get_unchecked(1)
+                    &val[s_idx..val.len()-e_idx]
                 ));
             }
         }
