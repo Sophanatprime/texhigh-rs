@@ -5,7 +5,7 @@ use std::str::FromStr;
 
 use clap::ArgMatches;
 use config;
-use log::warn;
+use log::{warn, info};
 use texhigh::config::{HighConfig, THConfig};
 use texhigh::{get_kpse_matches, get_matches, KpseWhich};
 use texhigh::high::StandardFormatter;
@@ -91,6 +91,7 @@ fn main() {
                         fs::create_dir_all(file_parent).unwrap();
                     }
                 }
+                info!(target: "Output", "Writing to {}", file);
                 let mut f = BufWriter::new(fs::File::create(&file_path).expect("Unable open output file"));
                 fm.format_now(&mut f).unwrap();
             }
@@ -143,6 +144,7 @@ fn get_thconfig(m: &ArgMatches) -> THConfig {
         let ctab_set_indices = m.indices_of("ctab-file").unwrap();
         let mut ctab_set: Vec<CTabSet> = Vec::with_capacity(ctab_set_indices.len());
         for ct in ctab_set_fn {
+            info!(target: "Finding ctab-file", "{}", ct);
             let mut f = BufReader::new(File::open(ct).expect("Unknown ctab-file"));
             let s = io::read_to_string(&mut f).expect("Unable read ctab-file");
             ctab_set.push(CTabSet::from_str(&s).expect("Cannot parse ctab-file"));
@@ -211,11 +213,15 @@ fn get_highconfig(m: &ArgMatches) -> HighConfig {
                 match kpse.output(config_str) {
                     Ok(source) => {
                         for f in &source {
+                            info!(target: "Finding config file", "{}", f);
                             config = config.add_source(File::new(f, FileFormat::Toml));
                         }
                     }
                     Err(_) => warn!(target: "Finding config file", "Unknown file: {}", config_str),
                 }
+            } else {
+                info!(target: "Finding config file", "{}", config_str);
+                config = config.add_source(File::new(config_str, FileFormat::Toml));
             }
         } else {
             config = config.add_source(File::from_str(config_str, FileFormat::Toml));
