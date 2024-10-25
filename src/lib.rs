@@ -15,8 +15,8 @@ pub mod types;
 mod unicode;
 
 const VERSION: i32 = 0;
-const REVERSION: &str = ".1.2";
-const DATE: &str = "2024/10/21";
+const REVERSION: &str = ".1.3";
+const DATE: &str = "2024/10/25";
 const COPYRIGHT: &str = "2024, Wenjian Chern ©";
 
 pub fn get_matches() -> ArgMatches {
