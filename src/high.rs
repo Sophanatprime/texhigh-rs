@@ -1,4 +1,8 @@
-use std::{fmt::Arguments, fs::File, io::{self, BufWriter, Write}};
+use std::{
+    fmt::Arguments,
+    fs::File,
+    io::{self, BufWriter, Write},
+};
 use unicode_properties::{GeneralCategoryGroup as UG, UnicodeGeneralCategory};
 
 use crate::config::HighConfig;
@@ -396,8 +400,8 @@ impl HighFormat for StandardFormatter<'_> {
                 Token::Char(chr) if chr.catcode == CatCode::Parameter => {
                     match tokenlist_iter.next() {
                         Some(nt) => match nt {
-                            Token::Char(nc) if nc.catcode == CatCode::Parameter || 
-                                (nc.catcode == CatCode::Other && nc.charcode.is_ascii_digit()) => {
+                            Token::Char(nc) if nc.catcode == CatCode::Parameter || (
+                                nc.catcode == CatCode::Other && nc.charcode.is_ascii_digit()) => {
                                     self.fmt_raw(stream, format_args!("\\THrs{{{}}}", "parameter"))?;
                                     self.fmt_chr(stream, chr)?;
                                     self.fmt_chr(stream, nc)?;
@@ -466,7 +470,10 @@ impl<'b> StandardFormatter<'b> {
         self.fmt_chr(stream, chr)?;
         loop {
             let token = if next_char.is_some() {
-                (next_char.unwrap(), { next_char = None; }).0
+                (next_char.unwrap(), {
+                    next_char = None;
+                })
+                    .0
             } else {
                 match tokens.next() {
                     Some(t) => t,

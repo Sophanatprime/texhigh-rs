@@ -26,4 +26,6 @@ lines = [0, 0]
 
 [ctabs_fallback]
 'cjk' = ['latex']
-'cjkl3' = ['latex3']
+'cjkl3' = ['cjk', 'latex3']
+'cjkcode' = ['cjk', 'latexcode']
+'cjkl3code' = ['cjk', 'latex3code']
