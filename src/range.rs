@@ -3,6 +3,8 @@ use std::fmt::Debug;
 use std::iter::{IntoIterator, Iterator, Step};
 use std::ops::{self, RangeInclusive};
 
+use compact_str::{format_compact, CompactString};
+
 use crate::types::ErrorKind;
 
 trait MinMaxValue {
@@ -179,13 +181,16 @@ pub fn parse_num(text: &str) -> Result<i64, ErrorKind> {
         if let Some(c2) = chars.next() {
             let (radix, num_str) = {
                 if c2 == 'x' || c2 == 'X' {
-                    (16, chars.collect::<String>())
+                    (16, chars.collect::<CompactString>())
                 } else if c2 == 'o' || c2 == 'O' {
-                    (8, chars.collect::<String>())
+                    (8, chars.collect::<CompactString>())
                 } else if c2 == 'b' || c2 == 'B' {
-                    (2, chars.collect::<String>())
+                    (2, chars.collect::<CompactString>())
                 } else {
-                    (10, format!("{}{}", c2, chars.collect::<String>()))
+                    (
+                        10,
+                        format_compact!("{}{}", c2, chars.collect::<CompactString>()),
+                    )
                 }
             };
             if let Ok(num) = i64::from_str_radix(&num_str, radix) {
@@ -212,7 +217,7 @@ pub fn parse_num(text: &str) -> Result<i64, ErrorKind> {
         }
     } else {
         let signal = if signal % 2 == 1 { "-" } else { "" };
-        let num_str = format!("{}{}{}", signal, c, chars.collect::<String>());
+        let num_str = format_compact!("{}{}{}", signal, c, chars.collect::<CompactString>());
         if let Ok(num) = i64::from_str_radix(&num_str, 10) {
             Ok(num)
         } else {

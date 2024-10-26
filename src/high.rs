@@ -1,3 +1,4 @@
+use compact_str::{format_compact, CompactString, ToCompactString};
 use std::{
     fmt::Arguments,
     fs::File,
@@ -36,6 +37,16 @@ impl HWrite for File {
     }
 }
 impl HWrite for String {
+    fn write_str(&mut self, s: &str) -> Result<(), ErrorKind> {
+        self.push_str(s);
+        Ok(())
+    }
+    fn write_fmt(&mut self, a: Arguments) -> Result<(), ErrorKind> {
+        self.push_str(&format!("{}", a));
+        Ok(())
+    }
+}
+impl HWrite for CompactString {
     fn write_str(&mut self, s: &str) -> Result<(), ErrorKind> {
         self.push_str(s);
         Ok(())
@@ -103,10 +114,10 @@ pub trait HighFormat {
     fn get_indent_len(&self, nest: usize) -> usize {
         2 * nest
     }
-    fn get_break_category(&self, _: &Token) -> &str {
+    fn get_break_category(&self, _: &Token) -> impl AsRef<str> {
         "?"
     }
-    fn get_cs_catogery(&self, cs: &ControlSequence) -> String {
+    fn get_cs_catogery(&self, cs: &ControlSequence) -> impl AsRef<str> {
         let engine = primitive_engine(cs.get_csname());
         if engine.is_empty() {
             match get_cs_type(cs.get_csname()) {
@@ -124,18 +135,18 @@ pub trait HighFormat {
                 LaTeXType::Punctuation => "?",
                 LaTeXType::Other | _ => "?",
             }
-            .to_string()
+            .to_compact_string()
         } else {
-            format!("primitive.{}", engine)
+            format_compact!("primitive.{}", engine)
         }
     }
-    fn get_chr_catogery(&self, _: &Character) -> &str {
+    fn get_chr_catogery(&self, _: &Character) -> impl AsRef<str> {
         "?"
     }
-    fn get_string_category(&self, _: &str) -> &str {
+    fn get_string_category(&self, _: &str) -> impl AsRef<str> {
         "?"
     }
-    fn get_punct_category(&self, token: &Token) -> Option<&str> {
+    fn get_punct_category(&self, token: &Token) -> Option<impl AsRef<str>> {
         match token {
             Token::Char(chr) if chr.charcode.general_category_group() == UG::Punctuation => {
                 Some("?")
@@ -175,12 +186,13 @@ pub trait HighFormat {
             stream,
             format_args!(
                 "\\THcs{{{}}}{{{}}}{{{}}}",
-                self.get_cs_catogery(cs),
+                self.get_cs_catogery(cs).as_ref(),
                 escape_string(
-                    &cs.escape_char.map_or("".to_string(), |c| format!("{}", c)),
+                    &cs.escape_char
+                        .map_or("".to_compact_string(), |c| format_compact!("{}", c)),
                     b'^'
                 ),
-                &cs.get_csname_escaped(b'^')
+                &cs.get_csname_escaped(b'^').as_str()
             ),
         )
     }
@@ -192,8 +204,8 @@ pub trait HighFormat {
                 stream,
                 format_args!(
                     "\\THch{{{}}}{{{}}}",
-                    self.get_chr_catogery(chr),
-                    escape_string(&chr.escape_control(b'^'), b'^')
+                    self.get_chr_catogery(chr).as_ref(),
+                    escape_string(chr.escape_control(b'^'), b'^')
                 ),
             )
         }
@@ -203,10 +215,10 @@ pub trait HighFormat {
             stream,
             format_args!(
                 "\\THpn{{{}}}{{\\{}}}",
-                self.get_punct_category(token).unwrap(),
+                self.get_punct_category(token).unwrap().as_ref(),
                 match token {
                     Token::Char(chr) => chr.escape_control(b'^'),
-                    Token::CS(cs) => cs.get_csname().to_string(),
+                    Token::CS(cs) => CompactString::new(cs.get_csname()),
                     Token::Any(_) => unreachable!(),
                 }
             ),
@@ -215,7 +227,11 @@ pub trait HighFormat {
     fn fmt_string<T: HWrite>(&self, stream: &mut T, s: &str) -> Result<(), ErrorKind> {
         self.fmt_raw(
             stream,
-            format_args!("\\THst{{{}}}{{{}}}", self.get_string_category(s), s),
+            format_args!(
+                "\\THst{{{}}}{{{}}}",
+                self.get_string_category(s).as_ref(),
+                s
+            ),
         )
     }
     fn fmt_any<T: HWrite>(&self, stream: &mut T, any: u32) -> Result<(), ErrorKind> {
@@ -288,10 +304,10 @@ impl HighFormat for StandardFormatter<'_> {
     fn get_indent_len(&self, nest: usize) -> usize {
         nest * self.high_config.break_indent as usize
     }
-    fn get_cs_catogery(&self, cs: &ControlSequence) -> String {
+    fn get_cs_catogery(&self, cs: &ControlSequence) -> impl AsRef<str> {
         let csname = cs.get_csname();
         match self.high_config.cs_categories.categories(csname) {
-            Some(cs_cat) => cs_cat.to_string(),
+            Some(cs_cat) => cs_cat.to_compact_string(),
             None => {
                 let engine = primitive_engine(csname);
                 if engine.is_empty() {
@@ -310,14 +326,14 @@ impl HighFormat for StandardFormatter<'_> {
                         LaTeXType::Punctuation => "?",
                         LaTeXType::Other | _ => "?",
                     }
-                    .to_string()
+                    .to_compact_string()
                 } else {
-                    format!("primitive.{}", engine)
+                    format_compact!("primitive.{}", engine)
                 }
             }
         }
     }
-    fn get_chr_catogery(&self, chr: &Character) -> &str {
+    fn get_chr_catogery(&self, chr: &Character) -> impl AsRef<str> {
         if matches!(chr.catcode, CatCode::BeginGroup | CatCode::EndGroup) {
             "group"
         } else {
@@ -335,7 +351,7 @@ impl HighFormat for StandardFormatter<'_> {
                 stream,
                 format_args!(
                     "\\THch{{{}}}{{{}}}",
-                    self.get_chr_catogery(chr),
+                    self.get_chr_catogery(chr).as_ref(),
                     escape_string(&chr.escape_control(b'^'), b'^')
                 ),
             )
@@ -347,9 +363,10 @@ impl HighFormat for StandardFormatter<'_> {
             stream,
             format_args!(
                 "\\THcs{{{}}}{{{}}}{{{}}}",
-                self.get_cs_catogery(cs),
+                self.get_cs_catogery(cs).as_ref(),
                 escape_string(
-                    &cs.escape_char.map_or("".to_string(), |c| format!("{}", c)),
+                    &cs.escape_char
+                        .map_or("".to_compact_string(), |c| format_compact!("{}", c)),
                     b'^'
                 ),
                 &cs.get_csname_escaped(b'^')

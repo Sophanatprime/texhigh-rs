@@ -25,6 +25,7 @@ codepage = "*"
 winapi = { version = "*", features = ["winnls"]}
 unicode-properties = "*"
 unicode-blocks = "*"
+compact_str = { version = "*", features = ["serde"] }
 
 # [profile.release]
 # debug = true

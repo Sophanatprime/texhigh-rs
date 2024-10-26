@@ -1,3 +1,4 @@
+use compact_str::{format_compact, CompactString, CompactStringExt, ToCompactString};
 use core::fmt;
 use hashers::fx_hash::FxHasher64;
 use indexmap::{map::IntoIter as IndexMapIntoIter, IndexMap};
@@ -639,9 +640,9 @@ impl CTabSet {
 
         let mut ignored_lines = 0usize;
         let mut key_o: Option<NumberSpan<char>> = None;
-        let mut name = String::new();
-        let mut key_str = String::new();
-        let mut val_str = String::new();
+        let mut name = CompactString::new("");
+        let mut key_str = CompactString::new("");
+        let mut val_str = CompactString::new("");
 
         loop {
             let c = if char_next.is_some() {
@@ -1061,6 +1062,12 @@ impl TryFrom<&String> for CatCode {
         value.as_str().try_into()
     }
 }
+impl TryFrom<&CompactString> for CatCode {
+    type Error = ErrorKind;
+    fn try_from(value: &CompactString) -> Result<Self, Self::Error> {
+        value.as_str().try_into()
+    }
+}
 
 pub trait CatCodeGetter {
     fn catcode_value(&self, at: char) -> Option<CatCode>;
@@ -1355,13 +1362,13 @@ impl ControlSequence {
     pub fn get_csname(&self) -> &str {
         unsafe { self.csname.get_unchecked(1..self.csname.len()) }
     }
-    pub fn get_csname_escaped(&self, e: u8) -> String {
+    pub fn get_csname_escaped(&self, e: u8) -> CompactString {
         escape_string(self.get_csname(), e)
     }
-    pub fn cs_with_escape_char(&self, escape_char: Option<char>) -> String {
+    pub fn cs_with_escape_char(&self, escape_char: Option<char>) -> CompactString {
         match escape_char {
-            Some(chr) => format!("{}{}", chr, self.get_csname()),
-            None => self.get_csname().to_string(),
+            Some(chr) => format_compact!("{}{}", chr, self.get_csname()),
+            None => self.get_csname().to_compact_string(),
         }
     }
     /// Write cs to stream, but do not process invisible and unprintable char.
@@ -1386,18 +1393,18 @@ impl Hash for ControlSequence {
     }
 }
 
-pub fn escape_string(s: &str, e: u8) -> String {
+pub fn escape_string<T: AsRef<str>>(s: T, e: u8) -> CompactString {
     let mut v = vec![];
-    for c in s.chars() {
+    for c in s.as_ref().chars() {
         if c.is_alphanumeric() {
-            v.push(format!("{}", c));
+            v.push(format_compact!("{}", c));
         } else if c.is_control() {
             v.push(escape_string(&escape_control(c, e), e));
         } else {
-            v.push(format!("\"{:X} ", c as u32));
+            v.push(format_compact!("\"{:X} ", c as u32));
         }
     }
-    v.concat()
+    v.concat_compact()
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -1450,16 +1457,16 @@ impl Character {
         return None;
     }
     /// Transform control symbol to `^^.` or `^^^^....` or `^^^^^^......` form.
-    pub fn escape_control(&self, e: u8) -> String {
+    pub fn escape_control(&self, e: u8) -> CompactString {
         if self.charcode.is_control() {
             escape_control(self.charcode, e)
         } else {
-            format!("{}", self.charcode)
+            format_compact!("{}", self.charcode)
         }
     }
 }
 
-pub fn escape_control(c: char, e: u8) -> String {
+pub fn escape_control(c: char, e: u8) -> CompactString {
     let e_chr = e as char;
     assert!(
         !e_chr.is_ascii_control(),
@@ -1467,18 +1474,18 @@ pub fn escape_control(c: char, e: u8) -> String {
     );
     match c {
         '\0'..'\x20' => {
-            format!("{e_chr}{e_chr}{}", (c as u8 + 0x40) as char)
+            format_compact!("{e_chr}{e_chr}{}", (c as u8 + 0x40) as char)
         }
         '\x7f' => {
-            format!("{e_chr}{e_chr}{}", '\x3f')
+            format_compact!("{e_chr}{e_chr}{}", '\x3f')
         }
         _ => {
             if c <= 255 as char {
-                format!("{e_chr}{e_chr}{:02x}", c as u8)
+                format_compact!("{e_chr}{e_chr}{:02x}", c as u8)
             } else if c <= '\u{ffff}' {
-                format!("{e_chr}{e_chr}{e_chr}{e_chr}{:04x}", c as u32)
+                format_compact!("{e_chr}{e_chr}{e_chr}{e_chr}{:04x}", c as u32)
             } else {
-                format!("{e_chr}{e_chr}{e_chr}{e_chr}{e_chr}{e_chr}{:06x}", c as u32)
+                format_compact!("{e_chr}{e_chr}{e_chr}{e_chr}{e_chr}{e_chr}{:06x}", c as u32)
             }
         }
     }
