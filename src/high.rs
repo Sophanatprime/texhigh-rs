@@ -381,6 +381,7 @@ impl HighFormat for StandardFormatter<'_> {
     ) -> Result<(), ErrorKind> {
         let mut next_char: Option<&Token> = None;
         let mut tokenlist_iter = tokenlist.iter();
+        let mut fmt_s = String::new();
         loop {
             let token = if next_char.is_some() {
                 (next_char.unwrap(), { next_char = None; }).0
@@ -392,24 +393,24 @@ impl HighFormat for StandardFormatter<'_> {
             };
             match token {
                 Token::Char(chr) if matches!(chr.catcode, CatCode::Letter | CatCode::Other) => {
-                    let mut s = String::new();
-                    next_char = StandardFormatter::write_string(self, &mut tokenlist_iter, &mut s, chr)?;
-                    self.fmt_string(stream, &s)?;
+                    next_char = StandardFormatter::write_string(self, &mut tokenlist_iter, &mut fmt_s, chr)?;
+                    self.fmt_string(stream, &fmt_s)?;
+                    fmt_s.clear();
                 }
                 Token::Char(chr) if chr.catcode == CatCode::Comment => {
-                    let mut s = String::new();
-                    let last_token = StandardFormatter::write_comment(self, &mut tokenlist_iter, &mut s, chr)?;
-                    self.fmt_raw(stream, format_args!("\\THrs{{{0}}}{1}\\THre{{{0}}}", "comment", &s))?;
+                    let last_token = StandardFormatter::write_comment(self, &mut tokenlist_iter, &mut fmt_s, chr)?;
+                    self.fmt_raw(stream, format_args!("\\THrs{{{0}}}{1}\\THre{{{0}}}", "comment", &fmt_s))?;
+                    fmt_s.clear();
                     if last_token.is_some() {
                         self.fmt_token(stream, last_token.unwrap())?;
                     }
                 }
                 Token::Char(chr) if chr.catcode == CatCode::MathShift => {
-                    let mut s = String::new();
                     let mut is_succ = true;
-                    StandardFormatter::write_inline_math(self, &mut tokenlist_iter, &mut s, chr, &mut is_succ)?;
+                    StandardFormatter::write_inline_math(self, &mut tokenlist_iter, &mut fmt_s, chr, &mut is_succ)?;
                     if is_succ {
-                        self.fmt_raw( stream, format_args!("\\THrs{{{0}}}{1}\\THre{{{0}}}", "math.inline", &s))?;
+                        self.fmt_raw( stream, format_args!("\\THrs{{{0}}}{1}\\THre{{{0}}}", "math.inline", &fmt_s))?;
+                        fmt_s.clear();
                     } else {
                         self.fmt_token(stream, token)?;
                     }
@@ -484,6 +485,7 @@ impl<'b> StandardFormatter<'b> {
         chr: &Character,
     ) -> Result<Option<&'a Token>, ErrorKind> {
         let mut next_char = None;
+        let mut fmt_s = String::new();
         self.fmt_chr(stream, chr)?;
         loop {
             let token = if next_char.is_some() {
@@ -499,9 +501,9 @@ impl<'b> StandardFormatter<'b> {
             };
             match token {
                 Token::Char(chr) if matches!(chr.catcode, CatCode::Letter | CatCode::Other) => {
-                    let mut s = String::new();
-                    next_char = StandardFormatter::write_string(self, tokens, &mut s, chr)?;
-                    self.fmt_string(stream, &s)?;
+                    next_char = StandardFormatter::write_string(self, tokens, &mut fmt_s, chr)?;
+                    self.fmt_string(stream, &fmt_s)?;
+                    fmt_s.clear();
                 }
                 Token::Char(c) => {
                     if c.catcode == CatCode::EndLine {

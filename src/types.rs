@@ -1536,8 +1536,8 @@ impl TokenList {
     }
     pub fn parse<S: AsRef<str>, C: CatCodeGetter>(source: S, catcode: &C) -> Self {
         let endline = match catcode.endline_char() {
-            Some(chr) => format!("{}", chr),
-            None => "".to_string(),
+            Some(chr) => format_compact!("{}", chr),
+            None => "".to_compact_string(),
         };
         let s = source.as_ref().lines().collect::<Vec<_>>().join(&endline);
         TokenList::_parse(s.chars(), catcode)
