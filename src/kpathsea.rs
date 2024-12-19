@@ -33,6 +33,30 @@ impl KpseWhich {
             encoding: String::new(),
         }
     }
+    pub fn var_value(var: &str, expand_brace: bool) -> Option<String> {
+        let mut cmd = Command::new("kpsewhich");
+        if expand_brace {
+            cmd.arg("--var-brace-value");
+        } else {
+            cmd.arg("--var-value");
+        }
+        cmd.arg(var);
+        let Ok(output) = cmd.output() else {
+            return None;
+        };
+        if !output.status.success() {
+            error!(target: "KpseWhich Exit Status", "{:?}", output.status);
+        }
+        let res = match Self::get_decoder(&output.stdout, "") {
+            Ok(encoding) => encoding.decode(&output.stdout).0.to_string(),
+            Err(_) => String::from_utf8_lossy(&output.stdout).to_string(),
+        };
+        if res.is_empty() {
+            None
+        } else {
+            Some(res.trim_ascii().to_owned())
+        }
+    }
     pub fn from_matches(m: &ArgMatches) -> KpseWhich {
         let all = m.get_flag("all");
         let must_exist = m.get_flag("must-exist");

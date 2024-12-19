@@ -1,31 +1,41 @@
 [package]
 name = "texhigh"
-version = "0.1.3"
+version = "0.1.4"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-hashers = "*"
-toml = "^0.8"
+anstyle = "*"
+anyhow = "1"
+bitflags = "2"
 clap = "~4"
-regex = "1"
+codepage = "*"
+compact_str = { version = "*", features = ["serde"] }
+config = "~0"
+cosmic-text = "*"
+dirs = "*"
+encoding_rs = "*"
+env_logger = "0"
+hashers = "*"
+indexmap = { version = "2", features = ["serde", "rayon"] }
+itoa = "*"
+lazy_static = "1"
+log = "0"
+mimalloc = "*"
 pest = "~2"
 pest_derive = "2"
-indexmap = "2"
-config = "~0"
-serde = { version = "1", features = ["derive"]}
+rapidfuzz = "*"
+rayon = "*"
+regex = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 serde_with = "3"
-lazy_static = "1"
-bitflags = "2"
-log = "0"
-env_logger = "0"
-encoding_rs = "*"
-codepage = "*"
-winapi = { version = "*", features = ["winnls"]}
+skrifa = "*"
+smallvec = { version = "1", features = ["serde", "write", "union"] }
+textwrap = { version = "*", features = ["terminal_size"] }
+toml = "^0.8"
 unicode-properties = "*"
-unicode-blocks = "*"
-compact_str = { version = "*", features = ["serde"] }
-
-# [profile.release]
-# debug = true
+walkdir = "2"
+winapi = { version = "*", features = ["winnls"] }
+yeslogic-unicode-blocks = "*"
