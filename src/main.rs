@@ -316,9 +316,9 @@ fn command_font(m: &ArgMatches) {
             #[cfg(target_os = "windows")]
             let sys_font_paths = vec!["C:\\windows\\fonts"];
             #[cfg(target_os = "macos")]
-            let default_paths = vec!["/Library/Fonts", "/System/Library/Fonts"];
+            let sys_font_paths = vec!["/Library/Fonts", "/System/Library/Fonts"];
             #[cfg(not(any(target_os = "windows", target_os = "macos")))]
-            let default_paths = vec!["/usr/local/share/fonts", "/usr/share/fonts"];
+            let sys_font_paths = vec!["/usr/local/share/fonts", "/usr/share/fonts"];
 
             // TODO: Need to use kpathsea/cpathsea to get truetype and opentype directories,
             // and remove the use of normalize_kpse_paths

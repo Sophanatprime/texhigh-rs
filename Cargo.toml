@@ -9,6 +9,7 @@ edition = "2021"
 anstyle = "*"
 anyhow = "1"
 bitflags = "2"
+byte-unit = "*"
 clap = "~4"
 codepage = "*"
 compact_str = { version = "*", features = ["serde"] }

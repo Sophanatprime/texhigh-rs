@@ -10,6 +10,7 @@ use std::{
 
 use anstyle::Style;
 use anyhow::{self, Context};
+use byte_unit::{Byte, UnitType};
 use compact_str::{CompactString, ToCompactString};
 use dirs::data_dir;
 use indexmap::{IndexMap, IndexSet};
@@ -1001,7 +1002,13 @@ pub fn display_font_data<W: std::fmt::Write>(
 
     if path.is_some() {
         let path_str = path.unwrap();
-        print_data("Path", path_str)?;
+        if let Ok(metadata) = std::fs::metadata(path_str) {
+            let adj_byte = Byte::from_u64(metadata.len()).get_appropriate_unit(UnitType::Binary);
+            print_data("Path", &format!("{} ({:.2})", path_str, adj_byte))?;
+        } else {
+            log::info!("Cannot get the metadata of file '{}'", path_str);
+            print_data("Path", path_str)?;
+        }
         if matches!(
             &path_str[(path_str.rfind('.').unwrap_or(0) + 1)..path_str.len()],
             "ttc" | "TTC" | "otc" | "OTC"
@@ -1125,7 +1132,10 @@ pub fn display_font_data<W: std::fmt::Write>(
         }
     }
     if !aval_tables.is_empty() {
-        print_data("Tables", &aval_tables.join(", "))?;
+        print_data(
+            &format!("Tables ({})", aval_tables.len()),
+            &aval_tables.join(", "),
+        )?;
     }
 
     // Variable.
@@ -1158,7 +1168,6 @@ pub fn display_font_data<W: std::fmt::Write>(
     } else {
         log::info!("Cannot resolve gsub table");
     }
-    let mut features_list = BTreeSet::new();
     if let Ok(gpos) = face.gpos() {
         if let Ok(gpos_feat) = gpos.feature_list() {
             for feat in gpos_feat.feature_records() {
@@ -1178,7 +1187,10 @@ pub fn display_font_data<W: std::fmt::Write>(
                 Err(_) => log::warn!("Cannot parse to str from {:?}", tag),
             };
         }
-        print_data("Features", &fe_list.join(", "))?;
+        print_data(
+            &format!("Features ({})", fe_list.len()),
+            &fe_list.join(", "),
+        )?;
     } // End of features.
 
     // Blocks.
@@ -1235,7 +1247,13 @@ pub fn display_font_data<W: std::fmt::Write>(
     }
     blocks.sort_unstable_by(|_, v1, _, v2| v1.2.cmp(&v2.2));
     let total_chars = blocks.iter().fold(0, |acc, (_, (n, ..))| acc + n);
-    print_data("Supported Characters", &total_chars.to_string())?;
+    let total_glyphs = face.maxp().map_or(0, |v| v.num_glyphs());
+    let chars_glyphs = if total_glyphs > 0 {
+        format!("{} <- {}", total_chars, total_glyphs)
+    } else {
+        format!("{}", total_chars)
+    };
+    print_data("Supported Characters", &chars_glyphs)?;
     for (&k, &(used, start, end)) in blocks.iter() {
         if used > 0 {
             let span = if start == 0 && end == 0 {
