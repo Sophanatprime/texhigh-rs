@@ -5,6 +5,7 @@ use std::io::{self, BufReader, BufWriter};
 use std::iter::{empty, zip};
 use std::path::Path;
 use std::str::FromStr;
+use std::time;
 
 use clap::ArgMatches;
 use config;
@@ -312,6 +313,7 @@ fn command_font(m: &ArgMatches) {
             paths
         }
 
+        let timer = time::Instant::now();
         let db = if default {
             #[cfg(target_os = "windows")]
             let sys_font_paths = vec!["C:\\windows\\fonts"];
@@ -373,7 +375,7 @@ fn command_font(m: &ArgMatches) {
             .as_ref()
             .expect("Cannot access the default data path")
             .join("texhigh-fontdb.json");
-        match db.save_to_file(&filename, false) {
+        let status = match db.save_to_file(&filename, false) {
             Ok(_) => {
                 println!(
                     "Found {} font face(s), {} indexed names, writing to '{}'",
@@ -387,7 +389,23 @@ fn command_font(m: &ArgMatches) {
                 eprintln!("{}", e);
                 false
             }
-        }
+        };
+
+        log::info!(
+            "Takes {:#}ms to build font database",
+            timer.elapsed().as_millis()
+        );
+        status
+    }
+
+    fn read_db<P: AsRef<Path>>(dbfile: P) -> anyhow::Result<FontDatabase> {
+        let timer = time::Instant::now();
+        let res = FontDatabase::from_json_file(dbfile);
+        log::info!(
+            "Takes {:#}ms to parse font database",
+            timer.elapsed().as_millis()
+        );
+        res
     }
 
     match m.subcommand() {
@@ -404,7 +422,7 @@ fn command_font(m: &ArgMatches) {
                 .expect("Cannot access the default data path")
                 .join("texhigh-fontdb.json");
             if dbfile.exists() || build_db(empty::<&str>(), true) {
-                match FontDatabase::from_json_file(&dbfile) {
+                match read_db(&dbfile) {
                     Ok(db) => find_font(&db, cmd_m),
                     Err(e) => eprintln!("{}", e),
                 }
