@@ -12,7 +12,7 @@ use std::{env::set_var as set_env_var, env::var as get_env_var, ffi::OsString};
 
 mod language;
 pub mod unicode;
-pub use language::{language, language_str, Language, PrimaryLanguage};
+pub use language::{is_same_primary_language, language, language_str, Language, PrimaryLanguage};
 mod kpathsea;
 mod tex;
 pub use kpathsea::KpseWhich;

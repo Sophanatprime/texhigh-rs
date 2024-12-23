@@ -47,7 +47,7 @@ impl KpseWhich {
         if !output.status.success() {
             error!(target: "KpseWhich Exit Status", "{:?}", output.status);
         }
-        let res = match Self::get_decoder(&output.stdout, "") {
+        let res = match get_decoder(&output.stdout, "") {
             Ok(encoding) => encoding.decode(&output.stdout).0.to_string(),
             Err(_) => String::from_utf8_lossy(&output.stdout).to_string(),
         };
@@ -142,39 +142,12 @@ impl KpseWhich {
         if !output.status.success() {
             error!(target: "KpseWhich Exit Status", "{:?}", output.status);
         }
-        let s = Self::get_decoder(&output.stdout, &self.encoding)?
+        let s = get_decoder(&output.stdout, &self.encoding)?
             .decode(&output.stdout)
             .0;
         let mut res = vec![];
         s.lines().for_each(|l| res.push(l.to_string()));
         Ok(res)
-    }
-
-    #[cfg(target_os = "windows")]
-    fn get_decoder(_: &Vec<u8>, prefer: &str) -> io::Result<&'static Encoding> {
-        let codepage = if prefer.is_empty() {
-            use winapi::um::winnls::GetACP;
-            let s = unsafe { GetACP() };
-            codepage::to_encoding(s as u16)
-        } else {
-            Encoding::for_label(prefer.as_bytes())
-        };
-        match codepage {
-            Some(cp) => {
-                info!(target: "Using Encoding", "{}", cp.name());
-                Ok(cp)
-            }
-            None => Err(io::ErrorKind::Other.into()),
-        }
-    }
-    #[cfg(not(target_os = "windows"))]
-    fn get_decoder(_: &Vec<u8>, prefer: &str) -> io::Result<&'static Encoding> {
-        if prefer.is_empty() {
-            use encoding_rs::UTF_8;
-            Ok(UTF_8)
-        } else {
-            Encoding::for_label(prefer.as_bytes()).ok_or(io::ErrorKind::Other.into())
-        }
     }
 }
 
@@ -184,5 +157,32 @@ impl Drop for KpseWhich {
             Some(inputs) => set_var("TEXINPUTS", inputs),
             None => remove_var("TEXINPUTS"),
         }
+    }
+}
+
+#[cfg(target_os = "windows")]
+pub(crate) fn get_decoder(_: &Vec<u8>, prefer: &str) -> io::Result<&'static Encoding> {
+    let codepage = if prefer.is_empty() {
+        use winapi::um::winnls::GetACP;
+        let s = unsafe { GetACP() };
+        codepage::to_encoding(s as u16)
+    } else {
+        Encoding::for_label(prefer.as_bytes())
+    };
+    match codepage {
+        Some(cp) => {
+            info!(target: "Using Encoding", "{}", cp.name());
+            Ok(cp)
+        }
+        None => Err(io::ErrorKind::Other.into()),
+    }
+}
+#[cfg(not(target_os = "windows"))]
+pub(crate) fn get_decoder(_: &Vec<u8>, prefer: &str) -> io::Result<&'static Encoding> {
+    if prefer.is_empty() {
+        use encoding_rs::UTF_8;
+        Ok(UTF_8)
+    } else {
+        Encoding::for_label(prefer.as_bytes()).ok_or(io::ErrorKind::Other.into())
     }
 }

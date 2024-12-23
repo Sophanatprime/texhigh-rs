@@ -534,7 +534,12 @@ fn find_font(db: &FontDatabase, cmd_m: &ArgMatches) {
                     name.starts_with(fontname)
                 } else {
                     let min = fontname.len();
-                    !(similarity_bytes(fontname.as_bytes(), &name.as_bytes()[0..min]) < fuzzy)
+                    let extra_len = name.as_bytes()[0..min]
+                        .iter()
+                        .filter(|&&v| v == b' ')
+                        .count();
+                    let the_name = &name.as_bytes()[0..name.len().min(min + extra_len)];
+                    !(similarity_bytes(fontname.as_bytes(), the_name) < fuzzy)
                 }
             })
             .collect::<Vec<_>>();

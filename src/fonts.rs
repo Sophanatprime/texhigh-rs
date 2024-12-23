@@ -32,10 +32,14 @@ use skrifa::{
     },
     FontRef, MetadataProvider,
 };
+use sys_locale::get_locale;
 use textwrap::{termwidth, wrap as text_wrap, Options as WrapOptions};
 use walkdir::WalkDir;
 
-use crate::unicode::{get_char_block_name, UNICODE_BLOCKS};
+use crate::{
+    is_same_primary_language,
+    unicode::{get_char_block_name, UNICODE_BLOCKS},
+};
 
 lazy_static! {
     /// If AppDataDirectory can be accessed, then use this directory.
@@ -47,6 +51,8 @@ lazy_static! {
         },
         Err(_) => None,
     });
+
+    pub static ref SYS_LOCALE: String = get_locale().unwrap_or(String::from("en-US"));
 }
 
 /// Calculate the similarity between a and b, the value is in [0.0, 1.0].
@@ -942,13 +948,81 @@ pub fn display_font_data<W: std::fmt::Write>(
         infostyle = infostyle.underline();
     }
 
+    // Start display
     if path.is_some() {
-        writeln!(f, "{infostyle}{}{infostyle:#}", path.unwrap())?; // Start display
+        writeln!(f, "{infostyle}{}{infostyle:#}", path.unwrap())?;
     }
 
     let face_string = |id: NameId| match face.localized_strings(id).english_or_first() {
         Some(ls) => ls.chars().collect(),
         None => CompactString::new(""),
+    };
+    let face_string_locales = |id: NameId| {
+        let locale = SYS_LOCALE.as_str();
+        if locale == "en-US" || locale == "en" {
+            face_string(id).to_string()
+        } else {
+            let mut res = String::new();
+            let mut best_rank = -1;
+            let mut best_string = None;
+            let mut locale_string = None;
+            let mut locale_locale = None;
+            for (i, string) in face.localized_strings(id).enumerate() {
+                let rank = match string.language() {
+                    Some(curr_locale) => {
+                        log::info!("Locale: {}", curr_locale);
+                        if curr_locale == locale {
+                            locale_string = Some(string);
+                            continue;
+                        } else if locale_string.is_none()
+                            && is_same_primary_language(curr_locale, locale)
+                        {
+                            locale_locale = Some(curr_locale.to_owned());
+                            locale_string = Some(string);
+                            continue;
+                        } else if curr_locale == "en-US" {
+                            4
+                        } else if curr_locale == "en" {
+                            3
+                        } else {
+                            if i == 0 {
+                                0
+                            } else {
+                                continue;
+                            }
+                        }
+                    }
+                    None => continue,
+                };
+                if rank > best_rank {
+                    best_rank = rank;
+                    best_string = Some(string);
+                }
+            }
+            match best_string {
+                Some(best_string) => {
+                    res.push_str(&best_string.chars().collect::<String>());
+                    if let Some(locale_string) = locale_string {
+                        let locale_string = locale_string.chars().collect::<String>();
+                        if !locale_string.is_empty() && &locale_string != &res {
+                            if !res.is_empty() {
+                                res.push_str(", ");
+                            }
+                            res.push_str(&locale_string);
+                            if !res.is_empty() {
+                                let locale = match &locale_locale {
+                                    Some(locale) => locale,
+                                    None => locale,
+                                };
+                                res.push_str(&format!("({})", locale));
+                            }
+                        }
+                    }
+                }
+                None => {}
+            }
+            res
+        }
     };
     let border_line = &if borderless {
         CompactString::const_new("")
@@ -1020,9 +1094,9 @@ pub fn display_font_data<W: std::fmt::Write>(
     }
     print_data("Version", &face_string(NameId::VERSION_STRING))?;
     print_data("Unique ID", &face_string(NameId::UNIQUE_ID))?;
-    print_data("Family", &face_string(NameId::FAMILY_NAME))?;
-    print_data("Style", &face_string(NameId::SUBFAMILY_NAME))?;
-    print_data("Full Name", &face_string(NameId::FULL_NAME))?;
+    print_data("Family", &face_string_locales(NameId::FAMILY_NAME))?;
+    print_data("Style", &face_string_locales(NameId::SUBFAMILY_NAME))?;
+    print_data("Full Name", &face_string_locales(NameId::FULL_NAME))?;
     print_data("Postscript Name", &face_string(NameId::POSTSCRIPT_NAME))?;
     print_data(
         "Postscript CID Name",
@@ -1353,7 +1427,7 @@ impl OS2FsType {
     }
 }
 
-struct OS2SFamilyClass(i16); // version, sFamilyClass
+struct OS2SFamilyClass(i16); // sFamilyClass
 impl OS2SFamilyClass {
     fn new(_version: u16, f_family_class: i16) -> OS2SFamilyClass {
         OS2SFamilyClass(f_family_class)
