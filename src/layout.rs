@@ -120,37 +120,48 @@ impl Layout {
                             .first()
                             .map_or(face.post_script_name.to_owned(), |v| v.0.to_owned()),
                     );
-                    // match &face.source {
-                    //     Source::Binary(_) => {
-                    //         fonts.insert(
-                    //             *font,
-                    //             face.families
-                    //                 .first()
-                    //                 .map_or(face.post_script_name.to_owned(), |v| {
-                    //                     v.0.to_owned()
-                    //                 }),
-                    //         );
-                    //     }
-                    //     Source::File(f_p) => {
-                    //         #[cfg(windows)]
-                    //         fonts.insert(*font, f_p.to_string_lossy().replace('\\', "/"));
-                    //         #[cfg(not(windows))]
-                    //         fonts.insert(*font, f_p.to_string_lossy().to_string());
-                    //     }
-                    //     Source::SharedFile(f_p, _) => {
-                    //         #[cfg(windows)]
-                    //         fonts.insert(*font, f_p.to_string_lossy().replace('\\', "/"));
-                    //         #[cfg(not(windows))]
-                    //         fonts.insert(*font, f_p.to_string_lossy().to_string());
-                    //     }
-                    // }
                 }
             }
             (font_ids, fonts)
         }
 
         match format {
-            OutputFormat::WriterGeneral(_stream) => {}
+            OutputFormat::WriterGeneral(stream) => {
+                let (_, fonts) = get_fonts(geometry, self.font_system.db());
+                let fonts_list_str = format!(
+                    "\\TeXHighFontLists{{{}}}",
+                    fonts
+                        .values()
+                        .map(|s| s.as_str())
+                        .collect::<Vec<_>>()
+                        .join(",")
+                );
+                writeln!(stream, "{}", &fonts_list_str)
+                    .map_err(|e| anyhow!("Cannot write to stream, cause {:?}", e))?;
+                writeln!(
+                    stream,
+                    "\\TeXHighSize{{{:.4}}}{{{:.4}}}",
+                    geometry.width / Self::RATIO,
+                    geometry.height / Self::RATIO
+                )
+                .map_err(|e| anyhow!("Cannot write to stream, cause {:?}", e))?;
+                for glyph in &geometry.glyphs {
+                    writeln!(
+                        stream,
+                        "\\TeXHighGlyphEntry{{{:.4}}}{{{:.4}}}{{{:.4}}}{{{:.4}}}{{{:.4}}}{{{:.4}}}{{{:.4}}}{{{}}}{{{}}}",
+                        glyph.x / Self::RATIO,
+                        glyph.y / Self::RATIO,
+                        glyph.w / Self::RATIO,
+                        glyph.x_offset / Self::RATIO,
+                        glyph.y_offset / Self::RATIO,
+                        glyph.font_size / Self::RATIO,
+                        glyph.line_height_opt.unwrap_or(glyph.font_size) / Self::RATIO,
+                        fonts.get_index_of(&glyph.font_id).unwrap() + 1,
+                        glyph.glyph_id,
+                    )
+                    .map_err(|e| anyhow!("Cannot write to stream, cause {:?}", e))?;
+                }
+            }
             OutputFormat::WriterPicture(stream) => {
                 let (_, fonts) = get_fonts(geometry, self.font_system.db());
                 let fonts_list_str = format!(
@@ -174,8 +185,8 @@ impl Layout {
                     writeln!(
                         stream,
                         "\\put({:.4}bp,{:.4}bp){{\\fontsize{{{:.2}}}{{{:.2}}}\\TeXHighFont{{{}}}\\TeXHighGlyph{}}}",
-                        glyph.x,
-                        glyph.y,
+                        glyph.x / Self::RATIO,
+                        glyph.y / Self::RATIO,
                         glyph.font_size / Self::RATIO,
                         glyph.line_height_opt.unwrap_or(glyph.font_size) / Self::RATIO,
                         fonts.get_index_of(&glyph.font_id).unwrap() + 1,

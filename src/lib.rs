@@ -211,15 +211,23 @@ pub fn get_matches() -> ArgMatches {
             Arg::new("output")
                 .long("output")
                 .short('o')
-                .help("Output to a image or terminal"),
+                .help("Output to a image or terminal, [picture, general, <png file>]"),
         )
         .arg(
             Arg::new("fontsize")
                 .long("fontsize")
                 .short('s')
                 .value_parser(value_parser!(f32))
-                .default_value("0.0")
-                .help("Fontsize of the text, in bp, range (0, +inf)"),
+                .default_value("10.0")
+                .help("Fontsize of the text, in bp, range (0.0, +inf)"),
+        )
+        .arg(
+            Arg::new("lineheight")
+                .long("lineheight")
+                .short('l')
+                .value_parser(value_parser!(f32))
+                .default_value("10.0")
+                .help("Lineheight of the text, in bp, range (0.0, +inf)"),
         )
         .arg(
             Arg::new("fonts")
@@ -230,11 +238,11 @@ pub fn get_matches() -> ArgMatches {
         )
         .arg(
             Arg::new("width")
-                .long("widtg")
+                .long("width")
                 .short('w')
                 .default_value("0.0")
                 .value_parser(value_parser!(f32))
-                .help("Maximum width of text, in bp, range (0, +inf)"),
+                .help("Maximum width of text, in bp, range (0.0, +inf)"),
         )
         .arg(Arg::new("text").required(true));
 

@@ -44,7 +44,7 @@ fn command_high(m: &ArgMatches) {
     let th_config = get_thconfig(&m);
 
     let ctabset = &th_config.ctabs;
-    let ctab_name = m.get_one::<String>("current-ctab").unwrap();
+    let ctab_name = &get_command_str(m, "current-ctab");
     let ctab = ctabset
         .get_by_name(ctab_name)
         .expect("Unknown currant catcode table name.");
@@ -68,7 +68,7 @@ fn command_high(m: &ArgMatches) {
 
     let mut tokenlist_vec: Vec<(String, bool)> = Vec::new();
     if m.contains_id("text") {
-        let text = normalize_quote(m.get_one::<String>("text").unwrap()).to_string();
+        let text = get_command_str(m, "text").to_string();
         tokenlist_vec.push((text, false));
     } else if m.contains_id("file") {
         let fna: Vec<Vec<&String>> = m
@@ -113,7 +113,7 @@ fn command_high(m: &ArgMatches) {
     }
 
     if m.contains_id("output") {
-        let out = std::path::Path::new(m.get_one::<String>("output").unwrap());
+        let out = &PathBuf::from(get_command_str(m, "output"));
         if fm_vec.len() == 1 {
             let fm = &fm_vec[0].0;
             let buffer_size = get_buffer_size(fm_vec[0].2);
@@ -240,18 +240,16 @@ fn get_highconfig(m: &ArgMatches) -> HighConfig {
     }
     if m.contains_id("config") {
         let mut con = Vec::new();
-        unsafe {
-            for k in m
-                .get_occurrences::<String>("config")
-                .unwrap()
-                .map(Iterator::collect::<Vec<_>>)
-            {
-                con.push(format!(
-                    "{} = '''{}'''",
-                    k.get_unchecked(0),
-                    normalize_quote(k.get_unchecked(1))
-                ));
-            }
+        for k in m
+            .get_occurrences::<String>("config")
+            .unwrap()
+            .map(Iterator::collect::<Vec<_>>)
+        {
+            con.push(format!(
+                "{} = '''{}'''",
+                unsafe { k.get_unchecked(0) },
+                normalize_quote(unsafe { k.get_unchecked(1) })
+            ));
         }
         let config_indices = m
             .indices_of("config")
@@ -437,9 +435,7 @@ fn find_font(db: &FontDatabase, cmd_m: &ArgMatches) {
         f.family.contains(n) || f.full.contains(n) || f.postscript.contains(n)
     };
 
-    let fontname = cmd_m
-        .get_one::<String>("name")
-        .expect("Require a font name");
+    let fontname = &get_command_str_except(cmd_m, "name", "Require a font name");
 
     if cmd_m.get_flag("local") {
         println!("Read font from '{}'", fontname);
@@ -615,10 +611,11 @@ fn find_font(db: &FontDatabase, cmd_m: &ArgMatches) {
 
 fn command_layout(m: &ArgMatches) {
     let font_size = *m.get_one::<f32>("fontsize").unwrap_or(&0.0);
+    let line_height = *m.get_one::<f32>("lineheight").unwrap_or(&font_size);
     let width = *m.get_one::<f32>("width").unwrap_or(&0.0);
     let mut fonts = vec![];
     if let Some(font_ref) = m.get_many::<String>("fonts") {
-        font_ref.for_each(|v| fonts.extend(v.split(',')));
+        font_ref.for_each(|v| fonts.extend(normalize_quote(v).split(',')));
     }
 
     let dbfile = DEFAULT_DATA_PATH
@@ -638,22 +635,35 @@ fn command_layout(m: &ArgMatches) {
         FontDatabase::new_empty()
     };
 
-    let mut form = if m.contains_id("output") {
-        OutputFormat::Image(PathBuf::from(m.get_one::<String>("output").unwrap()))
-    } else {
+    let output = m.get_one::<String>("output").map_or("picture", |v| v);
+    let output = normalize_quote(output);
+    let mut form = if output == "picture" {
         OutputFormat::WriterPicture(Box::new(io::stdout().lock()))
+    } else if output == "general" {
+        OutputFormat::WriterGeneral(Box::new(io::stdout().lock()))
+    } else {
+        OutputFormat::Image(PathBuf::from(output))
     };
 
     let mut lay = layout::Layout::new(&fontdb, &fonts);
 
     lay.add_system_fonts();
     lay.font_size = font_size;
+    lay.line_height = line_height;
     lay.text_width = width;
-    let geometry = lay.layout(m.get_one::<String>("text").unwrap());
+    let geometry = lay.layout(&get_command_str(m, "text"));
 
     if let Err(e) = lay.output(&geometry, &mut form) {
         eprintln!("Cannot layout text, cause {}", e);
     }
+}
+
+fn get_command_str<'a, 'b>(m: &'a ArgMatches, id: &'b str) -> String {
+    normalize_quote(m.get_one::<String>(id).unwrap()).to_owned()
+}
+
+fn get_command_str_except<'a, 'b>(m: &'a ArgMatches, id: &'b str, except: &'b str) -> String {
+    normalize_quote(m.get_one::<String>(id).expect(except)).to_owned()
 }
 
 fn round_n(num: f64, prec: i32) -> f64 {
