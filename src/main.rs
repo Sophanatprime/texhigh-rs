@@ -3,7 +3,7 @@ use std::env::current_exe;
 use std::fs::{self, File};
 use std::io::{self, BufReader, BufWriter};
 use std::iter::{empty, zip};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::time;
 
@@ -18,6 +18,7 @@ use texhigh::{
     },
     get_kpse_matches, get_matches,
     high::StandardFormatter,
+    layout::{self, OutputFormat},
     types::{CTabSet, CatcodeStack, TokenList},
     KpseWhich,
 };
@@ -34,6 +35,7 @@ fn main() {
     match m.subcommand() {
         Some(("high", high)) => command_high(high),
         Some(("font", font)) => command_font(font),
+        Some(("layout", layout)) => command_layout(layout),
         _ => {}
     }
 }
@@ -66,10 +68,7 @@ fn command_high(m: &ArgMatches) {
 
     let mut tokenlist_vec: Vec<(String, bool)> = Vec::new();
     if m.contains_id("text") {
-        // We strip exactly one set of ' character.
-        let text = m.get_one::<String>("text").unwrap();
-        let idx_offset = (text.starts_with("'") && text.ends_with("'")) as usize;
-        let text = text[idx_offset..text.len() - idx_offset].to_string();
+        let text = normalize_quote(m.get_one::<String>("text").unwrap()).to_string();
         tokenlist_vec.push((text, false));
     } else if m.contains_id("file") {
         let fna: Vec<Vec<&String>> = m
@@ -247,12 +246,10 @@ fn get_highconfig(m: &ArgMatches) -> HighConfig {
                 .unwrap()
                 .map(Iterator::collect::<Vec<_>>)
             {
-                let val = *k.get_unchecked(1);
-                let idx_offset = (val.starts_with("'") && val.ends_with("'")) as usize;
                 con.push(format!(
                     "{} = '''{}'''",
                     k.get_unchecked(0),
-                    &val[idx_offset..val.len() - idx_offset]
+                    normalize_quote(k.get_unchecked(1))
                 ));
             }
         }
@@ -302,112 +299,6 @@ fn get_buffer_size(file_size: u64) -> usize {
 }
 
 fn command_font(m: &ArgMatches) {
-    fn build_db<T, P>(paths: P, default: bool) -> bool
-    where
-        T: AsRef<Path>,
-        P: IntoIterator<Item = T>,
-        P::IntoIter: Clone,
-    {
-        // TODO: This should remove a path with the special syntax of kpathsea.
-        fn normalize_kpse_paths(paths: Vec<String>) -> Vec<String> {
-            paths
-        }
-
-        let timer = time::Instant::now();
-        let db = if default {
-            #[cfg(target_os = "windows")]
-            let sys_font_paths = vec!["C:\\windows\\fonts"];
-            #[cfg(target_os = "macos")]
-            let sys_font_paths = vec!["/Library/Fonts", "/System/Library/Fonts"];
-            #[cfg(not(any(target_os = "windows", target_os = "macos")))]
-            let sys_font_paths = vec!["/usr/local/share/fonts", "/usr/share/fonts"];
-
-            // TODO: Need to use kpathsea/cpathsea to get truetype and opentype directories,
-            // and remove the use of normalize_kpse_paths
-            let kpse_path = current_exe().and_then(|mut p| {
-                p.set_file_name("kpsewhich");
-                p.set_extension(std::env::consts::EXE_EXTENSION);
-                Ok(p)
-            });
-            let is_in_tex_bin_dir = kpse_path.map_or(false, |p| p.exists());
-            let tex_truetype_paths = if is_in_tex_bin_dir {
-                let mut res = vec![];
-                if let Some(texmf_dist_dir) = KpseWhich::var_value("TEXMFDIST", false) {
-                    res.push(format!("{}/fonts/truetype", &texmf_dist_dir));
-                    res.push(format!("{}/fonts/opentype", &texmf_dist_dir));
-                }
-                if let Some(texmf_local_dir) = KpseWhich::var_value("TEXMFLOCAL", false) {
-                    res.push(format!("{}/fonts/truetype", &texmf_local_dir));
-                    res.push(format!("{}/fonts/opentype", &texmf_local_dir));
-                }
-                normalize_kpse_paths(res)
-            } else {
-                vec![]
-            };
-
-            let input_paths = paths.into_iter();
-
-            println!("Finding truetype fonts from: [");
-            tex_truetype_paths
-                .iter()
-                .for_each(|p| println!("    {},", p));
-            sys_font_paths.iter().for_each(|p| println!("    {},", p));
-            input_paths
-                .clone()
-                .for_each(|p| println!("    {},", p.as_ref().display()));
-            println!("]");
-
-            let mut db = FontDatabase::new_from_paths(&tex_truetype_paths);
-            db.add_fonts(&sys_font_paths);
-            db.add_fonts(input_paths);
-            db
-        } else {
-            let input_paths = paths.into_iter();
-            println!("Finding truetype fonts from: [");
-            input_paths
-                .clone()
-                .for_each(|p| println!("    {},", p.as_ref().display()));
-            println!("]");
-            FontDatabase::new_from_paths(input_paths)
-        };
-
-        let filename = DEFAULT_DATA_PATH
-            .as_ref()
-            .expect("Cannot access the default data path")
-            .join("texhigh-fontdb.json");
-        let status = match db.save_to_file(&filename, false) {
-            Ok(_) => {
-                println!(
-                    "Found {} font face(s), {} indexed names, writing to '{}'",
-                    db.file_count(),
-                    db.link_count(),
-                    filename.display()
-                );
-                true
-            }
-            Err(e) => {
-                eprintln!("{}", e);
-                false
-            }
-        };
-
-        log::info!(
-            "Takes {:#}ms to build font database",
-            timer.elapsed().as_millis()
-        );
-        status
-    }
-
-    fn read_db<P: AsRef<Path>>(dbfile: P) -> anyhow::Result<FontDatabase> {
-        let timer = time::Instant::now();
-        let res = FontDatabase::from_json_file(dbfile);
-        log::info!(
-            "Takes {:#}ms to parse font database",
-            timer.elapsed().as_millis()
-        );
-        res
-    }
-
     match m.subcommand() {
         Some(("build", cmd_m)) => {
             let paths: Vec<&String> = cmd_m.get_many("paths").unwrap_or_default().collect();
@@ -432,6 +323,112 @@ fn command_font(m: &ArgMatches) {
         }
         _ => {}
     }
+}
+
+fn build_db<T, P>(paths: P, default: bool) -> bool
+where
+    T: AsRef<Path>,
+    P: IntoIterator<Item = T>,
+    P::IntoIter: Clone,
+{
+    // TODO: This should remove a path with the special syntax of kpathsea.
+    fn normalize_kpse_paths(paths: Vec<String>) -> Vec<String> {
+        paths
+    }
+
+    let timer = time::Instant::now();
+    let db = if default {
+        #[cfg(target_os = "windows")]
+        let sys_font_paths = vec!["C:\\windows\\fonts"];
+        #[cfg(target_os = "macos")]
+        let sys_font_paths = vec!["/Library/Fonts", "/System/Library/Fonts"];
+        #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+        let sys_font_paths = vec!["/usr/local/share/fonts", "/usr/share/fonts"];
+
+        // TODO: Need to use kpathsea/cpathsea to get truetype and opentype directories,
+        // and remove the use of normalize_kpse_paths
+        let kpse_path = current_exe().and_then(|mut p| {
+            p.set_file_name("kpsewhich");
+            p.set_extension(std::env::consts::EXE_EXTENSION);
+            Ok(p)
+        });
+        let is_in_tex_bin_dir = kpse_path.map_or(false, |p| p.exists());
+        let tex_truetype_paths = if is_in_tex_bin_dir {
+            let mut res = vec![];
+            if let Some(texmf_dist_dir) = KpseWhich::var_value("TEXMFDIST", false) {
+                res.push(format!("{}/fonts/truetype", &texmf_dist_dir));
+                res.push(format!("{}/fonts/opentype", &texmf_dist_dir));
+            }
+            if let Some(texmf_local_dir) = KpseWhich::var_value("TEXMFLOCAL", false) {
+                res.push(format!("{}/fonts/truetype", &texmf_local_dir));
+                res.push(format!("{}/fonts/opentype", &texmf_local_dir));
+            }
+            normalize_kpse_paths(res)
+        } else {
+            vec![]
+        };
+
+        let input_paths = paths.into_iter();
+
+        println!("Finding truetype fonts from: [");
+        tex_truetype_paths
+            .iter()
+            .for_each(|p| println!("    {},", p));
+        sys_font_paths.iter().for_each(|p| println!("    {},", p));
+        input_paths
+            .clone()
+            .for_each(|p| println!("    {},", p.as_ref().display()));
+        println!("]");
+
+        let mut db = FontDatabase::new_from_paths(&tex_truetype_paths);
+        db.add_fonts(&sys_font_paths);
+        db.add_fonts(input_paths);
+        db
+    } else {
+        let input_paths = paths.into_iter();
+        println!("Finding truetype fonts from: [");
+        input_paths
+            .clone()
+            .for_each(|p| println!("    {},", p.as_ref().display()));
+        println!("]");
+        FontDatabase::new_from_paths(input_paths)
+    };
+
+    let filename = DEFAULT_DATA_PATH
+        .as_ref()
+        .expect("Cannot access the default data path")
+        .join("texhigh-fontdb.json");
+    let status = match db.save_to_file(&filename, false) {
+        Ok(_) => {
+            println!(
+                "Found {} font face(s), {} indexed names, writing to '{}'",
+                db.file_count(),
+                db.link_count(),
+                filename.display()
+            );
+            true
+        }
+        Err(e) => {
+            eprintln!("{}", e);
+            false
+        }
+    };
+
+    log::info!(
+        "Takes {:#}ms to build font database",
+        timer.elapsed().as_millis()
+    );
+    status
+}
+
+fn read_db<P: AsRef<Path>>(dbfile: P) -> anyhow::Result<FontDatabase> {
+    let timer = time::Instant::now();
+    let res = FontDatabase::from_json_file(dbfile);
+    log::info!(
+        "Takes {:#}ms to parse font database",
+        timer.elapsed().as_millis()
+    );
+    res
 }
 
 fn find_font(db: &FontDatabase, cmd_m: &ArgMatches) {
@@ -616,7 +613,59 @@ fn find_font(db: &FontDatabase, cmd_m: &ArgMatches) {
     }
 }
 
+fn command_layout(m: &ArgMatches) {
+    let font_size = *m.get_one::<f32>("fontsize").unwrap_or(&0.0);
+    let width = *m.get_one::<f32>("width").unwrap_or(&0.0);
+    let mut fonts = vec![];
+    if let Some(font_ref) = m.get_many::<String>("fonts") {
+        font_ref.for_each(|v| fonts.extend(v.split(',')));
+    }
+
+    let dbfile = DEFAULT_DATA_PATH
+        .as_ref()
+        .expect("Cannot access the default data path")
+        .join("texhigh-fontdb.json");
+    let fontdb = if dbfile.exists() || build_db(empty::<&str>(), true) {
+        match read_db(&dbfile) {
+            Ok(db) => db,
+            Err(e) => {
+                eprintln!("{}", e);
+                FontDatabase::new_empty()
+            }
+        }
+    } else {
+        eprintln!("Cannot read or build Font Database");
+        FontDatabase::new_empty()
+    };
+
+    let mut form = if m.contains_id("output") {
+        OutputFormat::Image(PathBuf::from(m.get_one::<String>("output").unwrap()))
+    } else {
+        OutputFormat::WriterPicture(Box::new(io::stdout().lock()))
+    };
+
+    let mut lay = layout::Layout::new(&fontdb, &fonts);
+
+    lay.add_system_fonts();
+    lay.font_size = font_size;
+    lay.text_width = width;
+    let geometry = lay.layout(m.get_one::<String>("text").unwrap());
+
+    if let Err(e) = lay.output(&geometry, &mut form) {
+        eprintln!("Cannot layout text, cause {}", e);
+    }
+}
+
 fn round_n(num: f64, prec: i32) -> f64 {
     let mul = 10f64.powi(prec);
     (num * mul).round_ties_even() / mul
+}
+
+fn normalize_quote(s: &str) -> &str {
+    if s.len() >= 2 {
+        let idx_offset = (s.starts_with('\'') && s.ends_with('\'')) as usize;
+        &s[idx_offset..s.len() - idx_offset]
+    } else {
+        s
+    }
 }

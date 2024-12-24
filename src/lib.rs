@@ -18,6 +18,7 @@ mod tex;
 pub use kpathsea::KpseWhich;
 pub mod config;
 pub mod high;
+pub mod layout;
 pub mod range;
 // mod regtex;
 pub mod fonts;
@@ -205,6 +206,37 @@ pub fn get_matches() -> ArgMatches {
                         .help("Font name or font path to be searched"),
                 ),
         );
+    let layout = Command::new("layout")
+        .arg(
+            Arg::new("output")
+                .long("output")
+                .short('o')
+                .help("Output to a image or terminal"),
+        )
+        .arg(
+            Arg::new("fontsize")
+                .long("fontsize")
+                .short('s')
+                .value_parser(value_parser!(f32))
+                .default_value("0.0")
+                .help("Fontsize of the text, in bp, range (0, +inf)"),
+        )
+        .arg(
+            Arg::new("fonts")
+                .long("fonts")
+                .short('f')
+                .action(ArgAction::Append)
+                .help("Main font and its fallback fonts for the text"),
+        )
+        .arg(
+            Arg::new("width")
+                .long("widtg")
+                .short('w')
+                .default_value("0.0")
+                .value_parser(value_parser!(f32))
+                .help("Maximum width of text, in bp, range (0, +inf)"),
+        )
+        .arg(Arg::new("text").required(true));
 
     let matches = Command::new("texhigh")
         .about("TeX Helper in graphics and hypertext")
@@ -233,6 +265,7 @@ pub fn get_matches() -> ArgMatches {
         )
         .subcommand(high)
         .subcommand(font)
+        .subcommand(layout)
         .get_matches();
 
     if !matches.get_flag("no-banner") {

@@ -77,6 +77,17 @@ pub struct FontDatabase {
 }
 
 impl FontDatabase {
+    pub fn new_empty() -> Self {
+        FontDatabase {
+            file: Vec::new(),
+            link: FontLinks::Map(IndexMap::new()),
+            fontset: FontLinks::Map(IndexMap::new()),
+            file_count: 0,
+            link_count: 0,
+            link_hash: Vec::new(),
+            fontset_hash: Vec::new(),
+        }
+    }
     /// Walk through paths and read all fonts to build database.
     pub fn new_from_paths<T: AsRef<Path>, P: IntoIterator<Item = T>>(paths: P) -> Self {
         let mut dbs = FontDatabase::default();
@@ -719,6 +730,14 @@ impl FontFile {
             }
         )
     }
+
+    /// Read all data from the font file, return the data and the index of the font.
+    pub fn read(&self) -> std::io::Result<(Vec<u8>, u32)> {
+        let mut file = File::open(self.path.as_path())?;
+        let mut data = Vec::new();
+        file.read_to_end(&mut data)?;
+        Ok((data, self.index))
+    }
 }
 
 struct FontFileNameFormatter<'a>(&'a Vec<String>, usize);
@@ -1231,13 +1250,48 @@ pub fn display_font_data<W: std::fmt::Write>(
 
     // Features.
     let mut features_list = BTreeSet::new();
+    let mut gsub_list = vec![];
+    let mut gpos_list = vec![];
+    let mut scripts: IndexMap<[u8; 4], IndexMap<[u8; 4], BTreeSet<[u8; 4]>>> = IndexMap::new();
     if let Ok(gsub) = face.gsub() {
         if let Ok(gsub_feat) = gsub.feature_list() {
             for feat in gsub_feat.feature_records() {
-                features_list.insert(feat.feature_tag().into_bytes());
+                let feature_tag = feat.feature_tag().to_be_bytes();
+                features_list.insert(feature_tag);
+                gsub_list.push(feature_tag);
             }
         } else {
-            log::info!("Cannot resolve gsub feature table");
+            log::info!("Cannot resolve gsub feature list");
+        }
+        if let Ok(gsub_script) = gsub.script_list() {
+            for scr in gsub_script.script_records() {
+                let script_tag = scr.script_tag().to_be_bytes();
+                if let Ok(sc) = scr.script(gsub_script.offset_data()) {
+                    let curr_script = scripts.entry(script_tag).or_insert(IndexMap::new());
+                    if let Some(Ok(dflt_lang_sys)) = sc.default_lang_sys() {
+                        let dflt = curr_script.entry(*b"DFLT").or_insert(BTreeSet::new());
+                        for feat_idx in dflt_lang_sys.feature_indices() {
+                            gsub_list
+                                .get(feat_idx.get() as usize)
+                                .and_then(|v| Some(dflt.insert(*v)));
+                        }
+                    }
+                    for lang in sc.lang_sys_records() {
+                        let lang_tag = lang.lang_sys_tag().to_be_bytes();
+                        if let Ok(lang_sys) = lang.lang_sys(sc.offset_data()) {
+                            let script_lang =
+                                curr_script.entry(lang_tag).or_insert(BTreeSet::new());
+                            for feat_idx in lang_sys.feature_indices() {
+                                gsub_list
+                                    .get(feat_idx.get() as usize)
+                                    .and_then(|v| Some(script_lang.insert(*v)));
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            log::info!("Cannot resolve gsub script list");
         }
     } else {
         log::info!("Cannot resolve gsub table");
@@ -1245,10 +1299,42 @@ pub fn display_font_data<W: std::fmt::Write>(
     if let Ok(gpos) = face.gpos() {
         if let Ok(gpos_feat) = gpos.feature_list() {
             for feat in gpos_feat.feature_records() {
-                features_list.insert(feat.feature_tag().into_bytes());
+                let feature_tag = feat.feature_tag().into_bytes();
+                features_list.insert(feature_tag);
+                gpos_list.push(feature_tag);
             }
         } else {
-            log::info!("Cannot resolve gpos feature table");
+            log::info!("Cannot resolve gpos feature list");
+        }
+        if let Ok(gpos_script) = gpos.script_list() {
+            for scr in gpos_script.script_records() {
+                let script_tag = scr.script_tag().to_be_bytes();
+                if let Ok(sc) = scr.script(gpos_script.offset_data()) {
+                    let curr_script = scripts.entry(script_tag).or_insert(IndexMap::new());
+                    if let Some(Ok(dflt_lang_sys)) = sc.default_lang_sys() {
+                        let dflt = curr_script.entry(*b"DFLT").or_insert(BTreeSet::new());
+                        for feat_idx in dflt_lang_sys.feature_indices() {
+                            gpos_list
+                                .get(feat_idx.get() as usize)
+                                .and_then(|v| Some(dflt.insert(*v)));
+                        }
+                    }
+                    for lang in sc.lang_sys_records() {
+                        let lang_tag = lang.lang_sys_tag().to_be_bytes();
+                        if let Ok(lang_sys) = lang.lang_sys(sc.offset_data()) {
+                            let script_lang =
+                                curr_script.entry(lang_tag).or_insert(BTreeSet::new());
+                            for feat_idx in lang_sys.feature_indices() {
+                                gpos_list
+                                    .get(feat_idx.get() as usize)
+                                    .and_then(|v| Some(script_lang.insert(*v)));
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            log::info!("Cannot resolve gpos script list");
         }
     } else {
         log::info!("Cannot resolve gpos table");
@@ -1265,7 +1351,24 @@ pub fn display_font_data<W: std::fmt::Write>(
             &format!("Features ({})", fe_list.len()),
             &fe_list.join(", "),
         )?;
-    } // End of features.
+    }
+    for (tag, script) in scripts {
+        let tag_s = CompactString::from_utf8_lossy(&tag);
+        for (lang, feats) in script {
+            let lang_s = CompactString::from_utf8_lossy(&lang);
+            let header = format!("  - Script [{}][{}]", &tag_s, &lang_s);
+            let value = format!(
+                "{}",
+                feats
+                    .iter()
+                    .map(|v| CompactString::from_utf8_lossy(v))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+            print_data(&header, &value)?;
+        }
+    }
+    // End of features.
 
     // Blocks.
     let mut chars_list = HashSet::new();

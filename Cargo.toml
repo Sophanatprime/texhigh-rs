@@ -36,6 +36,7 @@ skrifa = "*"
 smallvec = { version = "1", features = ["serde", "write", "union"] }
 sys-locale = "*"
 textwrap = { version = "*", features = ["terminal_size"] }
+tiny-skia = "*"
 toml = "^0.8"
 unicode-properties = "*"
 walkdir = "2"
