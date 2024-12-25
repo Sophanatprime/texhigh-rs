@@ -129,7 +129,7 @@ impl Layout {
             OutputFormat::WriterGeneral(stream) => {
                 let (_, fonts) = get_fonts(geometry, self.font_system.db());
                 let fonts_list_str = format!(
-                    "\\TeXHighFontLists{{{}}}",
+                    "\\TeXHighFontList{{{}}}",
                     fonts
                         .values()
                         .map(|s| s.as_str())
@@ -163,9 +163,10 @@ impl Layout {
                 }
             }
             OutputFormat::WriterPicture(stream) => {
+                // the thought is from https://www.zhihu.com/question/5191394151/answer/43285145062
                 let (_, fonts) = get_fonts(geometry, self.font_system.db());
                 let fonts_list_str = format!(
-                    "\\TeXHighFontLists{{{}}}",
+                    "\\TeXHighFontList{{{}}}",
                     fonts
                         .values()
                         .map(|s| s.as_str())
