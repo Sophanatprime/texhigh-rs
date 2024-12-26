@@ -17,7 +17,7 @@ use texhigh::{
         display_font_file_all_face, similarity_bytes, FontDatabase, FontFile, DEFAULT_DATA_PATH,
     },
     get_kpse_matches, get_matches,
-    high::StandardFormatter,
+    high::{HWrite, StandardFormatter},
     layout::{self, OutputFormat},
     types::{CTabSet, CatcodeStack, TokenList},
     KpseWhich,
@@ -36,6 +36,7 @@ fn main() {
         Some(("high", high)) => command_high(high),
         Some(("font", font)) => command_font(font),
         Some(("layout", layout)) => command_layout(layout),
+        Some(("text", text)) => command_text(text),
         _ => {}
     }
 }
@@ -622,7 +623,9 @@ fn command_layout(m: &ArgMatches) {
         .as_ref()
         .expect("Cannot access the default data path")
         .join("texhigh-fontdb.json");
-    let fontdb = if dbfile.exists() || build_db(empty::<&str>(), true) {
+    let fontdb = if fonts.is_empty() {
+        FontDatabase::new_empty()
+    } else if dbfile.exists() || build_db(empty::<&str>(), true) {
         match read_db(&dbfile) {
             Ok(db) => db,
             Err(e) => {
@@ -655,6 +658,106 @@ fn command_layout(m: &ArgMatches) {
 
     if let Err(e) = lay.output(&geometry, &mut form) {
         eprintln!("Cannot layout text, cause {}", e);
+    }
+}
+
+fn command_text(m: &ArgMatches) {
+    use regex::{Captures, Regex};
+    use unicode_linebreak::linebreaks;
+    use unicode_names2::name as uni_name;
+    use unicode_script::UnicodeScript;
+    use unicode_segmentation::UnicodeSegmentation;
+    use yeslogic_unicode_blocks::find_unicode_block;
+
+    let text = &get_command_str(m, "text");
+    let escaped = m.get_flag("escaped");
+    let printer: Box<dyn Fn(&str) -> String> = if escaped {
+        Box::new(|s: &str| {
+            let mut res = String::new();
+            for c in s.chars() {
+                res.push_str(&format!("\\u{:04x}", c as u32));
+            }
+            res
+        })
+    } else {
+        Box::new(|s: &str| format!("{:?}", s))
+    };
+
+    let from_uni_re = Regex::new(r"\\u(\{[[:xdigit:]]{1,8}\}|[[:xdigit:]]{1,8})").unwrap();
+    let to_uni_re = Regex::new(r"(.)").unwrap();
+    let from_uni_seq = |s: &str| {
+        from_uni_re
+            .replace_all(s, |c: &Captures<'_>| {
+                let s = c[1].to_string();
+                let start = s.starts_with('{') as usize;
+                match u32::from_str_radix(&s[start..s.len() - start], 16) {
+                    Ok(cp) => match char::from_u32(cp) {
+                        Some(c) => format!("{}", c),
+                        None => String::new(),
+                    },
+                    Err(_) => String::new(),
+                }
+            })
+            .to_string()
+    };
+    let to_uni_seq = |s: &str| {
+        to_uni_re
+            .replace_all(s, |cap: &Captures<'_>| match cap[1].chars().next() {
+                Some(c) => format!("\\u{:04x}", c as u32),
+                None => String::new(),
+            })
+            .to_string()
+    };
+
+    let mut ioout = io::stdout().lock();
+    writeln!(ioout, "Text: '{}'", text).expect("Cannot write to stream");
+    let mut last_idx = 0;
+    if m.get_flag("from-unicode") {
+        writeln!(ioout, "{}", &from_uni_seq(text)).expect("Cannot write to stream");
+    } else if m.get_flag("to-unicode") {
+        writeln!(ioout, "{}", &to_uni_seq(text)).expect("Cannot write to stream");
+    } else if m.get_flag("linebreak") {
+        for (idx, op) in linebreaks(text) {
+            if idx == last_idx {
+                continue;
+            }
+            writeln!(ioout, "{}, {:?}", printer(&text[last_idx..idx]), op)
+                .expect("Cannot write to stream");
+            last_idx = idx;
+        }
+    } else if m.get_flag("cluster") {
+        for s in text.graphemes(true) {
+            writeln!(ioout, "{}", printer(s)).expect("Cannot write to stream");
+        }
+    } else if m.get_flag("word") {
+        for s in text.unicode_words() {
+            writeln!(ioout, "{}", printer(s)).expect("Cannot write to stream");
+        }
+    } else if m.get_flag("sentence") {
+        for s in text.unicode_sentences() {
+            writeln!(ioout, "{}", printer(s)).expect("Cannot write to stream");
+        }
+    } else {
+        for c in text.chars() {
+            let name = &match uni_name(c) {
+                Some(n) => n.to_string(),
+                None => "<NA>".to_string(),
+            };
+            let block = match find_unicode_block(c) {
+                Some(blk) => blk.name(),
+                None => "No Block",
+            };
+            writeln!(
+                ioout,
+                "{}, U+{:04X}, Script: '{:?}', Block: '{}', Name: '{}'",
+                c,
+                c as u32,
+                c.script(),
+                block,
+                name
+            )
+            .expect("Cannot write to stream");
+        }
     }
 }
 

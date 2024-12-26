@@ -38,7 +38,11 @@ sys-locale = "*"
 textwrap = { version = "*", features = ["terminal_size"] }
 tiny-skia = "*"
 toml = "^0.8"
+unicode-linebreak = "*"
 unicode-properties = "*"
+unicode-script = "*"
+unicode-segmentation = "*"
+unicode_names2 = "*"
 walkdir = "2"
 winapi = { version = "*", features = ["winnls"] }
 yeslogic-unicode-blocks = "*"

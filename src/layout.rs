@@ -211,8 +211,8 @@ impl Layout {
                     ));
                 }
 
-                let width = (geometry.width + 0.5).round() as u32;
-                let height = (geometry.height + 0.5).round() as u32;
+                let width = geometry.width.ceil() as u32;
+                let height = geometry.height.ceil() as u32;
                 let mut pixmap = Pixmap::new(width, height).unwrap();
                 let mut paint = Paint::default();
                 paint.anti_alias = false;

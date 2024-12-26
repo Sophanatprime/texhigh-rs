@@ -116,6 +116,7 @@ pub fn get_matches() -> ArgMatches {
         );
 
     let font = Command::new("font")
+        .about("Font utilities")
         .subcommand(
             Command::new("build")
                 .arg(
@@ -226,7 +227,7 @@ pub fn get_matches() -> ArgMatches {
                 .long("lineheight")
                 .short('l')
                 .value_parser(value_parser!(f32))
-                .default_value("10.0")
+                .default_value("0.0")
                 .help("Lineheight of the text, in bp, range (0.0, +inf)"),
         )
         .arg(
@@ -234,7 +235,7 @@ pub fn get_matches() -> ArgMatches {
                 .long("fonts")
                 .short('f')
                 .action(ArgAction::Append)
-                .help("Main font and its fallback fonts for the text"),
+                .help("Main font and its fallback fonts for the text, system font will be loaded automatically"),
         )
         .arg(
             Arg::new("width")
@@ -243,6 +244,64 @@ pub fn get_matches() -> ArgMatches {
                 .default_value("0.0")
                 .value_parser(value_parser!(f32))
                 .help("Maximum width of text, in bp, range (0.0, +inf)"),
+        )
+        .arg(Arg::new("text").required(true));
+    let text = Command::new("text")
+        .about("Display text information, i.e. names or boundries")
+        .arg(
+            Arg::new("escaped")
+                .long("escaped")
+                .short('e')
+                .action(ArgAction::SetTrue)
+                .help("Display result by using escaped sequences"),
+        )
+        .arg(
+            Arg::new("cluster")
+                .long("cluster")
+                .alias("grapheme")
+                .short('c')
+                .short_alias('g')
+                .action(ArgAction::SetTrue)
+                .help("Display text by extended grapheme clusters boundry")
+                .conflicts_with_all(["word", "sentence", "linebreak"]),
+        )
+        .arg(
+            Arg::new("word")
+                .long("word")
+                .short('w')
+                .action(ArgAction::SetTrue)
+                .help("Display text by word boundry")
+                .conflicts_with_all(["sentence", "linebreak"]),
+        )
+        .arg(
+            Arg::new("sentence")
+                .long("sentence")
+                .short('s')
+                .action(ArgAction::SetTrue)
+                .help("Display text by sentence")
+                .conflicts_with_all(["linebreak"]),
+        )
+        .arg(
+            Arg::new("linebreak")
+                .long("linebreak")
+                .short('l')
+                .action(ArgAction::SetTrue)
+                .help("Display text by linebreak point"),
+        )
+        .arg(
+            Arg::new("from-unicode")
+                .long("from-unicode")
+                .short('f')
+                .action(ArgAction::SetTrue)
+                .help("Print the text parsed from a unicode escaped sequences")
+                .conflicts_with("to-unicode"),
+        )
+        .arg(
+            Arg::new("to-unicode")
+                .long("to-unicode")
+                .short('t')
+                .action(ArgAction::SetTrue)
+                .help("Print the unicode escaped sequences of the text"),
         )
         .arg(Arg::new("text").required(true));
 
@@ -274,6 +333,7 @@ pub fn get_matches() -> ArgMatches {
         .subcommand(high)
         .subcommand(font)
         .subcommand(layout)
+        .subcommand(text)
         .get_matches();
 
     if !matches.get_flag("no-banner") {
