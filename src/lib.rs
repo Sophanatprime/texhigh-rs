@@ -39,21 +39,21 @@ pub fn get_matches() -> ArgMatches {
                 .long("enhanced")
                 .short('e')
                 .action(ArgAction::SetTrue)
-                .help("Use enhanced mode"),
+                .help("Enable enhanced mode for highlighting."),
         )
         .arg(
             Arg::new("current-ctab")
                 .long("current-ctab")
                 .alias("cc")
                 .default_value("latex")
-                .help("Set current catcode table"),
+                .help("Set the current catcode table to use for highlighting."),
         )
         .arg(
             Arg::new("ctab-set")
                 .long("ctab-set")
                 .alias("cs")
                 .action(ArgAction::Append)
-                .help("Parse catcode table set from texts"),
+                .help("Parse and set catcode tables from the provided text."),
         )
         .arg(
             Arg::new("ctab")
@@ -62,7 +62,7 @@ pub fn get_matches() -> ArgMatches {
                 .value_names(["name", "ctab"])
                 .num_args(2)
                 .action(ArgAction::Append)
-                .help("Parse catcode table from texts"),
+                .help("Parse a catcode table from the provided text. Requires two arguments: <name> and <ctab>."),
         )
         .arg(
             Arg::new("ctab-base64")
@@ -71,14 +71,14 @@ pub fn get_matches() -> ArgMatches {
                 .value_names(["name", "ctab"])
                 .num_args(2)
                 .action(ArgAction::Append)
-                .help("Parse catcode table from texts whose second value is encoded with base 64"),
+                .help("Parse a catcode table from the provided text where the second value is base64 encoded. Requires two arguments: <name> and <ctab>."),
         )
         .arg(
             Arg::new("ctab-file")
                 .long("ctab-file")
                 .short('F')
                 .action(ArgAction::Append)
-                .help("Parse catcode table from files"),
+                .help("Parse a catcode table from the specified file."),
         )
         .arg(
             Arg::new("config")
@@ -87,7 +87,7 @@ pub fn get_matches() -> ArgMatches {
                 .value_names(["key", "value"])
                 .num_args(2)
                 .action(ArgAction::Append)
-                .help("Parse config from texts"),
+                .help("Parse a configuration setting from the provided text. Requires two arguments: <key> and <value>."),
         )
         .arg(
             Arg::new("config-base64")
@@ -96,13 +96,13 @@ pub fn get_matches() -> ArgMatches {
                 .value_names(["key", "value"])
                 .num_args(2)
                 .action(ArgAction::Append)
-                .help("Parse config from texts whose second value is encoded with base 64"),
+                .help("Parse a configuration setting from the provided text where the second value is base64 encoded. Requires two arguments: <key> and <value>."),
         )
         .arg(
             Arg::new("config-file")
                 .long("config-file")
                 .alias("cf")
-                .help("Parse config from files")
+                .help("Parse a configuration setting from the specified file.")
                 .action(ArgAction::Append),
         )
         .arg(
@@ -110,21 +110,21 @@ pub fn get_matches() -> ArgMatches {
                 .long("kpse-config-file")
                 .alias("kcf")
                 .action(ArgAction::SetTrue)
-                .help("Use kpsewhich to search config files."),
+                .help("Use `kpsewhich` to search for configuration files."),
         )
         .arg(
             Arg::new("text")
                 .long("text")
                 .short('t')
                 .value_name("TEXT")
-                .help("Text to be highlight"),
+                .help("Specify the text to be highlighted."),
         )
         .arg(
             Arg::new("text-base64")
                 .long("text-base64")
                 .alias("tb")
                 .value_name("TEXT")
-                .help("Base 64 encoded text to be highlight"),
+                .help("Specify the base64 encoded text to be highlighted."),
         )
         .arg(
             Arg::new("file")
@@ -132,53 +132,54 @@ pub fn get_matches() -> ArgMatches {
                 .short('f')
                 .num_args(1 ..)
                 .value_name("FILE")
-                .help("Files to be highlight")
+                .help("Specify one or more files to be highlighted. Conflicts with --text.")
                 .conflicts_with("text"),
         )
         .arg(
             Arg::new("output")
                 .long("output")
                 .short('o')
-                .help("File or directory to be output"),
+                .help("Specify the output file or directory for the highlighted content."),
         )
         .arg(
             Arg::new("kpse-args")
                 .last(true)
                 .num_args(0 ..)
-                .help("Arguments for kpsewhich"),
+                .help("Pass additional arguments to `kpsewhich`."),
         );
-
-    let font = Command::new("font")
-        .about("Font utilities")
+        let font = Command::new("font")
+        .about("Utilities for managing and querying fonts")
         .subcommand(
             Command::new("build")
+                .about("Build font configurations")
                 .arg(
                     Arg::new("no-default-paths")
                         .long("no-default-paths")
                         .action(ArgAction::SetTrue)
-                        .help("Do not use default paths"),
+                        .help("Disable the use of default font paths."),
                 )
                 .arg(
                     Arg::new("paths")
                         .num_args(0 ..)
-                        .help("Set paths of fonts to be added"),
+                        .help("Specify custom paths to fonts to be added."),
                 ),
         )
         .subcommand(
             Command::new("find")
+                .about("Search for fonts based on specified criteria")
                 .arg(
                     Arg::new("unwrapped")
                         .long("unwrapped")
                         .short('W')
                         .action(ArgAction::SetTrue)
-                        .help("Do not wrap text when text is too long"),
+                        .help("Disable text wrapping when the output text is too long."),
                 )
                 .arg(
                     Arg::new("borderless")
                         .long("borderless")
                         .short('B')
                         .action(ArgAction::SetTrue)
-                        .help("Do not display borders"),
+                        .help("Disable the display of borders in the output."),
                 )
                 .arg(
                     Arg::new("local")
@@ -186,7 +187,7 @@ pub fn get_matches() -> ArgMatches {
                         .short('L')
                         .action(ArgAction::SetTrue)
                         .conflicts_with_all(["only-family", "starts", "fuzzy", "full", "short"])
-                        .help("Do not search database, reading font from local directory"),
+                        .help("Search for fonts only in the local directory, bypassing the database."),
                 )
                 .arg(
                     Arg::new("only-family")
@@ -194,7 +195,7 @@ pub fn get_matches() -> ArgMatches {
                         .alias("only-family")
                         .short('N')
                         .action(ArgAction::SetTrue)
-                        .help("Match family name only and exactly"),
+                        .help("Match only the exact family name of the font."),
                 )
                 .arg(
                     Arg::new("starts")
@@ -202,7 +203,7 @@ pub fn get_matches() -> ArgMatches {
                         .short('S')
                         .action(ArgAction::SetTrue)
                         .conflicts_with_all(["only-family"])
-                        .help("Match starts of the font name"),
+                        .help("Match fonts whose names start with the specified string."),
                 )
                 .arg(
                     Arg::new("fuzzy")
@@ -211,41 +212,41 @@ pub fn get_matches() -> ArgMatches {
                         .num_args(0 ..= 1)
                         .default_missing_value("0.7")
                         .value_parser(value_parser!(f64))
-                        .help("Use fuzzy matching, range [0.0, 1.0]"),
+                        .help("Enable fuzzy matching with a similarity threshold in the range [0.0, 1.0]. Defaults to 0.7 if no value is provided."),
                 )
                 .arg(
                     Arg::new("info")
                         .long("info")
                         .short('i')
                         .action(ArgAction::SetTrue)
-                        .help("Read font file and display informations"),
+                        .help("Display detailed information about the font file."),
                 )
                 .arg(
                     Arg::new("full")
                         .long("full")
                         .short('f')
                         .action(ArgAction::SetTrue)
-                        .help("Display extra informations"),
+                        .help("Display extended information about the font."),
                 )
                 .arg(
                     Arg::new("short")
                         .long("short")
                         .short('s')
                         .action(ArgAction::SetTrue)
-                        .help("Display path, index and family name only"),
+                        .help("Display only the font path, index, and family name."),
                 )
                 .arg(
                     Arg::new("name")
                         .num_args(1)
-                        .help("Font name or font path to be searched"),
+                        .help("Specify the font name or path to search for."),
                 ),
         );
-    let layout = Command::new("layout")
+        let layout = Command::new("layout")
         .arg(
             Arg::new("output")
                 .long("output")
                 .short('o')
-                .help("Output to a image or terminal, [picture, general, <png file>]"),
+                .help("Specify the output destination. Options: 'picture', 'general', or a path to a PNG file."),
         )
         .arg(
             Arg::new("fontsize")
@@ -253,7 +254,7 @@ pub fn get_matches() -> ArgMatches {
                 .short('s')
                 .value_parser(value_parser!(f32))
                 .default_value("10.0")
-                .help("Fontsize of the text, in bp, range (0.0, +inf)"),
+                .help("Set the font size of the text in bp (big points). Must be greater than 0.0."),
         )
         .arg(
             Arg::new("lineheight")
@@ -261,14 +262,14 @@ pub fn get_matches() -> ArgMatches {
                 .short('l')
                 .value_parser(value_parser!(f32))
                 .default_value("0.0")
-                .help("Lineheight of the text, in bp, range (0.0, +inf)"),
+                .help("Set the line height of the text in bp (big points). Must be greater than 0.0."),
         )
         .arg(
             Arg::new("fonts")
                 .long("fonts")
                 .short('f')
                 .action(ArgAction::Append)
-                .help("Main font and its fallback fonts for the text, system font will be loaded automatically"),
+                .help("Specify the main font and its fallback fonts. System fonts are loaded automatically."),
         )
         .arg(
             Arg::new("width")
@@ -276,12 +277,17 @@ pub fn get_matches() -> ArgMatches {
                 .short('w')
                 .default_value("0.0")
                 .value_parser(value_parser!(f32))
-                .help("Maximum width of text, in bp, range (0.0, +inf)"),
+                .help("Set the maximum width of the text in bp (big points). Must be greater than 0.0."),
         )
-        .arg(Arg::new("base64").long("base64").action(ArgAction::SetTrue).help("Is text encoded with Base 64 or not"))
+        .arg(
+            Arg::new("base64")
+                .long("base64")
+                .action(ArgAction::SetTrue)
+                .help("Indicate whether the text is encoded in Base64."),
+        )
         .arg(Arg::new("text").required(true));
     let text = Command::new("text")
-        .about("Display text information, i.e. names or boundries")
+        .about("Display text information, such as character boundaries or names.")
         .arg(
             Arg::new("cluster")
                 .long("cluster")
@@ -289,32 +295,32 @@ pub fn get_matches() -> ArgMatches {
                 .short('c')
                 .short_alias('g')
                 .action(ArgAction::SetTrue)
-                .help("Display text by extended grapheme clusters boundry")
-                .conflicts_with_all(["word", "sentence", "linebreak", "list"]),
+                .help("Display text by extended grapheme cluster boundaries.")
+                .conflicts_with_all(["word", "sentence", "linebreak", "information"]),
         )
         .arg(
             Arg::new("word")
                 .long("word")
                 .short('w')
                 .action(ArgAction::SetTrue)
-                .help("Display text by word boundry")
-                .conflicts_with_all(["sentence", "linebreak", "list"]),
+                .help("Display text by word boundaries.")
+                .conflicts_with_all(["sentence", "linebreak", "information"]),
         )
         .arg(
             Arg::new("sentence")
                 .long("sentence")
                 .short('s')
                 .action(ArgAction::SetTrue)
-                .help("Display text by sentence")
-                .conflicts_with_all(["linebreak", "list"]),
+                .help("Display text by sentence boundaries.")
+                .conflicts_with_all(["linebreak", "information"]),
         )
         .arg(
             Arg::new("linebreak")
                 .long("linebreak")
                 .short('l')
                 .action(ArgAction::SetTrue)
-                .help("Display text by linebreak point")
-                .conflicts_with_all(["list"]),
+                .help("Display text by line break points.")
+                .conflicts_with_all(["information"]),
         )
         .arg(
             Arg::new("information")
@@ -322,7 +328,7 @@ pub fn get_matches() -> ArgMatches {
                 .alias("info")
                 .short('i')
                 .action(ArgAction::SetTrue)
-                .help("List the information of every characters"),
+                .help("List detailed information for each character in the text."),
         )
         .arg(
             Arg::new("from-unicode")
@@ -330,9 +336,7 @@ pub fn get_matches() -> ArgMatches {
                 .visible_alias("from-escaped")
                 .short('f')
                 .action(ArgAction::SetTrue)
-                .help(
-                    "Print the text parsed from a unicode escaped sequences\n",
-                )
+                .help("Parse and print text from Unicode escape sequences.")
                 .conflicts_with("to-unicode"),
         )
         .arg(
@@ -342,19 +346,19 @@ pub fn get_matches() -> ArgMatches {
                 .short('t')
                 .visible_short_alias('e')
                 .action(ArgAction::SetTrue)
-                .help("Print the unicode escaped sequences of the text\n"),
+                .help("Print the Unicode escape sequences for the text."),
         )
         .arg(
             Arg::new("normalization")
                 .long("normalization")
                 .short('n')
                 .value_parser(["nfd", "nfkd", "nfc", "nfkc", "cjk", "safe"])
-                .help("Apply Unicode normalization to the text\n"),
+                .help("Apply Unicode normalization to the text."),
         )
         .arg(
             Arg::new("text")
-                .help("The text. If not present, then get from stdin.")
-                .num_args(0 ..= 1),
+                .help("The text to process. If not provided, text will be read from stdin.")
+                .num_args(0..=1),
         );
 
     let matches = Command::new("texhigh")
