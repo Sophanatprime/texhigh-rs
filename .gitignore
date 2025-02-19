@@ -2,5 +2,5 @@
 *.rs-bak
 *.lock
 *.xlsx
-*.tex
-latex test*
+/latex test
+*.txt

@@ -1,6 +1,5 @@
 /* !! The list may not be complete. */
 
-use lazy_static::lazy_static;
 use std::collections::{HashMap, HashSet};
 
 bitflags! {

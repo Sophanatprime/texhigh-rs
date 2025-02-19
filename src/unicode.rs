@@ -11,17 +11,17 @@ pub fn get_char_range_from_block_name(name: &str) -> Option<NumberSpan<char>> {
         Some(&rng) => {
             let chr_start = char::from_u32(rng.start())?;
             let chr_end = char::from_u32(rng.end())?;
-            Some((chr_start..=chr_end).into())
+            Some((chr_start ..= chr_end).into())
         }
         None => None,
     }
 }
 pub fn get_char_block_name(c: u32) -> Option<&'static str> {
-    if matches!(c, 0xD800..=0xDB7F) {
+    if matches!(c, 0xD800 ..= 0xDB7F) {
         Some("High Surrogates")
-    } else if matches!(c, 0xDB80..=0xDBFF) {
+    } else if matches!(c, 0xDB80 ..= 0xDBFF) {
         Some("High Private Use Surrogates")
-    } else if matches!(c, 0xDC00..=0xDFFF) {
+    } else if matches!(c, 0xDC00 ..= 0xDFFF) {
         Some("Low Surrogates")
     } else if c > 0x10FFFF {
         None

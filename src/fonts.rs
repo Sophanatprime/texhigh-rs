@@ -89,7 +89,9 @@ impl FontDatabase {
         }
     }
     /// Walk through paths and read all fonts to build database.
-    pub fn new_from_paths<T: AsRef<Path>, P: IntoIterator<Item = T>>(paths: P) -> Self {
+    pub fn new_from_paths<T: AsRef<Path>, P: IntoIterator<Item = T>>(
+        paths: P,
+    ) -> Self {
         let mut dbs = FontDatabase::default();
         paths.into_iter().for_each(|p| dbs.add_items_from_path(p));
         dbs
@@ -101,10 +103,11 @@ impl FontDatabase {
             path.as_ref().display()
         ))?;
         let reader = BufReader::new(file);
-        let mut dbs: FontDatabase = serde_json::from_reader(reader).context(format!(
-            "Cannot parse database file '{}'",
-            path.as_ref().display()
-        ))?;
+        let mut dbs: FontDatabase =
+            serde_json::from_reader(reader).context(format!(
+                "Cannot parse database file '{}'",
+                path.as_ref().display()
+            ))?;
         match dbs.link {
             FontLinks::Map(_) => {}
             FontLinks::Vec(_) => {
@@ -138,12 +141,17 @@ impl FontDatabase {
     /// Save FontDataBase to a json file.
     ///
     /// If `ascii` is true, then escapes all non-ASCII characters.
-    pub fn save_to_file<T: AsRef<Path>>(&self, filename: T, ascii: bool) -> anyhow::Result<()> {
+    pub fn save_to_file<T: AsRef<Path>>(
+        &self,
+        filename: T,
+        ascii: bool,
+    ) -> anyhow::Result<()> {
         let file = File::create(filename.as_ref())
             .context(format!("Cannot open file [{:?}]", filename.as_ref()))?;
         let writer = BufWriter::new(file);
         if ascii {
-            let mut ser = Serializer::with_formatter(writer, EscapedFormatter::new());
+            let mut ser =
+                Serializer::with_formatter(writer, EscapedFormatter::new());
             self.serialize(&mut ser).context(format!(
                 "Cannot write to file '{}'",
                 filename.as_ref().display()
@@ -162,7 +170,11 @@ impl FontDatabase {
     /// Return the real filename.
     ///
     /// If `ascii` is true, then escapes all non-ASCII characters.
-    pub fn save<T: AsRef<Path>>(&self, filename: T, ascii: bool) -> anyhow::Result<PathBuf> {
+    pub fn save<T: AsRef<Path>>(
+        &self,
+        filename: T,
+        ascii: bool,
+    ) -> anyhow::Result<PathBuf> {
         let dir = DEFAULT_DATA_PATH
             .as_ref()
             .context("Cannot access the default data path")?;
@@ -233,7 +245,11 @@ impl FontDatabase {
     /// Get FontFile from a fuzzy font name.
     /// Retrieves an iterator instance that yields a `(&FontFile, f64)`,
     /// which may include duplicate `FontFile`s.
-    pub fn get_fontinfo_fuzzy(&self, name: &str, score: f64) -> FileFuzzyIter<'_> {
+    pub fn get_fontinfo_fuzzy(
+        &self,
+        name: &str,
+        score: f64,
+    ) -> FileFuzzyIter<'_> {
         FileFuzzyIter {
             database: self,
             link_iter: self.link.fuzzy_search(name, score).into_iter(),
@@ -247,7 +263,9 @@ impl FontDatabase {
     pub fn contains(&self, name: &str) -> bool {
         match &self.link {
             FontLinks::Map(map) => map.contains_key(name),
-            FontLinks::Vec(vec) => vec.par_iter().find_any(|&v| v.name == name).is_some(),
+            FontLinks::Vec(vec) => {
+                vec.par_iter().find_any(|&v| v.name == name).is_some()
+            }
         }
     }
 
@@ -291,7 +309,10 @@ impl FontDatabase {
                     if let Some(io_err) = err.io_error() {
                         match io_err.kind() {
                             io::ErrorKind::PermissionDenied => {
-                                log::warn!("Missing permission to read '{}'", &p);
+                                log::warn!(
+                                    "Missing permission to read '{}'",
+                                    &p
+                                );
                             }
                             _ => {
                                 log::info!("Fail to read '{}'", &p);
@@ -357,25 +378,25 @@ impl FontDatabase {
         } else {
             1
         };
-        for index in 0..faces_count {
+        for index in 0 .. faces_count {
             let filename = path.as_ref().to_string_lossy().to_string();
             parse_font(&mut self.file, filename, &data, index);
         }
 
         match &mut self.link {
-            FontLinks::Map(map) => self
-                .file
-                .iter()
-                .enumerate()
-                .for_each(|(index, file)| parse_link(map, file, index as u32)),
+            FontLinks::Map(map) => {
+                self.file.iter().enumerate().for_each(|(index, file)| {
+                    parse_link(map, file, index as u32)
+                })
+            }
             FontLinks::Vec(_) => unreachable!(),
         }
         match &mut self.fontset {
-            FontLinks::Map(map) => self
-                .file
-                .iter()
-                .enumerate()
-                .for_each(|(index, file)| parse_fontset(map, file, index as u32)),
+            FontLinks::Map(map) => {
+                self.file.iter().enumerate().for_each(|(index, file)| {
+                    parse_fontset(map, file, index as u32)
+                })
+            }
             FontLinks::Vec(_) => unreachable!(),
         }
 
@@ -384,7 +405,12 @@ impl FontDatabase {
     }
 }
 
-fn parse_font(fontfiles: &mut Vec<FontFile>, filename: String, data: &[u8], index: u32) {
+fn parse_font(
+    fontfiles: &mut Vec<FontFile>,
+    filename: String,
+    data: &[u8],
+    index: u32,
+) {
     #[cfg(target_os = "windows")]
     let filename = filename.replace('\\', "/");
 
@@ -433,7 +459,9 @@ fn parse_font(fontfiles: &mut Vec<FontFile>, filename: String, data: &[u8], inde
                 postscript.insert(name_str)
             }
             NameId::TYPOGRAPHIC_FAMILY_NAME => prefer_family.insert(name_str),
-            NameId::TYPOGRAPHIC_SUBFAMILY_NAME => prefer_style.insert(name_str),
+            NameId::TYPOGRAPHIC_SUBFAMILY_NAME => {
+                prefer_style.insert(name_str)
+            }
             _ => false,
         };
     }
@@ -441,7 +469,10 @@ fn parse_font(fontfiles: &mut Vec<FontFile>, filename: String, data: &[u8], inde
     let mut inst_style = Vec::new();
     let mut inst_postscript = Vec::new();
     let mut inst_tuple = Vec::new();
-    fn get_fvar_name(name_records: &Vec<(NameId, CompactString)>, id: NameId) -> Option<String> {
+    fn get_fvar_name(
+        name_records: &Vec<(NameId, CompactString)>,
+        id: NameId,
+    ) -> Option<String> {
         for (name_id, name_str) in name_records {
             if *name_id == id {
                 return Some(name_str.to_string());
@@ -465,7 +496,9 @@ fn parse_font(fontfiles: &mut Vec<FontFile>, filename: String, data: &[u8], inde
                 // inst_postscript
                 if let Some(id) = instance.post_script_name_id {
                     match get_fvar_name(&name_records, id) {
-                        Some(name_str) => inst_postscript.push((name_str, idx)),
+                        Some(name_str) => {
+                            inst_postscript.push((name_str, idx))
+                        }
                         None => {}
                     }
                 }
@@ -498,7 +531,11 @@ fn parse_font(fontfiles: &mut Vec<FontFile>, filename: String, data: &[u8], inde
     fontfiles.push(fontfile);
 }
 
-fn parse_link(fontlinks: &mut IndexMap<String, Vec<u32>>, file: &FontFile, index: u32) {
+fn parse_link(
+    fontlinks: &mut IndexMap<String, Vec<u32>>,
+    file: &FontFile,
+    index: u32,
+) {
     fn join_name<'a, T1, T2>(fl: T1, sl: T2) -> Vec<String>
     where
         T1: IntoIterator<Item = &'a String>,
@@ -520,7 +557,11 @@ fn parse_link(fontlinks: &mut IndexMap<String, Vec<u32>>, file: &FontFile, index
         });
         res
     }
-    fn store(fontlinks: &mut IndexMap<String, Vec<u32>>, key: &str, value: u32) {
+    fn store(
+        fontlinks: &mut IndexMap<String, Vec<u32>>,
+        key: &str,
+        value: u32,
+    ) {
         if !fontlinks.contains_key(key) {
             fontlinks.insert(key.to_owned(), Vec::new());
         }
@@ -542,17 +583,12 @@ fn parse_link(fontlinks: &mut IndexMap<String, Vec<u32>>, file: &FontFile, index
     file.inst_postscript
         .iter()
         .for_each(|(name, _)| store(fontlinks, name, index));
-    file.postscript
-        .iter()
-        .for_each(|name| store(fontlinks, name, index));
-    file.full
-        .iter()
-        .for_each(|name| store(fontlinks, name, index));
+    file.postscript.iter().for_each(|name| store(fontlinks, name, index));
+    file.full.iter().for_each(|name| store(fontlinks, name, index));
 
-    let inst_names = join_name(family, inst_style.iter().map(|(name, _)| name));
-    inst_names
-        .iter()
-        .for_each(|name| store(fontlinks, name, index));
+    let inst_names =
+        join_name(family, inst_style.iter().map(|(name, _)| name));
+    inst_names.iter().for_each(|name| store(fontlinks, name, index));
     let names = if !prefer_family.is_empty() && !prefer_style.is_empty() {
         join_name(prefer_family, prefer_style)
     } else if !family.is_empty() && !style.is_empty() {
@@ -563,7 +599,11 @@ fn parse_link(fontlinks: &mut IndexMap<String, Vec<u32>>, file: &FontFile, index
     names.iter().for_each(|name| store(fontlinks, name, index));
 }
 
-fn parse_fontset(fontsets: &mut IndexMap<String, Vec<u32>>, file: &FontFile, index: u32) {
+fn parse_fontset(
+    fontsets: &mut IndexMap<String, Vec<u32>>,
+    file: &FontFile,
+    index: u32,
+) {
     let run = if file.prefer_family.is_empty() {
         &file.family
     } else {
@@ -595,12 +635,17 @@ impl<'a, 'b> FontDatabaseRef<'a, 'b> {
     /// Save FontDataBaseRef to a json file.
     ///
     /// If `ascii` is true, then escapes all non-ASCII characters.
-    pub fn save_to_file<T: AsRef<Path>>(&self, filename: T, ascii: bool) -> anyhow::Result<()> {
+    pub fn save_to_file<T: AsRef<Path>>(
+        &self,
+        filename: T,
+        ascii: bool,
+    ) -> anyhow::Result<()> {
         let file = File::create(filename.as_ref())
             .context(format!("Cannot open file [{:?}]", filename.as_ref()))?;
         let writer = BufWriter::new(file);
         if ascii {
-            let mut ser = Serializer::with_formatter(writer, EscapedFormatter::new());
+            let mut ser =
+                Serializer::with_formatter(writer, EscapedFormatter::new());
             self.serialize(&mut ser).context(format!(
                 "Cannot write to file '{}'",
                 filename.as_ref().display()
@@ -619,7 +664,11 @@ impl<'a, 'b> FontDatabaseRef<'a, 'b> {
     /// Return the real filename.
     ///
     /// If `ascii` is true, then escapes all non-ASCII characters.
-    pub fn save<T: AsRef<Path>>(&self, filename: T, ascii: bool) -> anyhow::Result<PathBuf> {
+    pub fn save<T: AsRef<Path>>(
+        &self,
+        filename: T,
+        ascii: bool,
+    ) -> anyhow::Result<PathBuf> {
         let dir = DEFAULT_DATA_PATH
             .as_ref()
             .context("Cannot access the default data path")?;
@@ -716,7 +765,11 @@ impl FontFile {
     pub fn display_info(&self) -> String {
         self.display_info_with(true, false)
     }
-    pub fn display_info_with(&self, wrapped: bool, borderless: bool) -> String {
+    pub fn display_info_with(
+        &self,
+        wrapped: bool,
+        borderless: bool,
+    ) -> String {
         format!(
             "{}",
             FontFileFormatter {
@@ -749,11 +802,15 @@ impl<'a> Display for FontFileNameFormatter<'a> {
         if self.1 < 4 {
             write!(f, "[ ")?;
             let max_dotted = self.1.min(self.0.len()) - 1;
-            for i in 0..max_dotted {
+            for i in 0 .. max_dotted {
                 write!(f, "{} , ", self.0[i])?;
             }
             write!(f, "{}", self.0[max_dotted])?;
-            write!(f, "{} ]", if self.1 < self.0.len() { " , .." } else { "" })?;
+            write!(
+                f,
+                "{} ]",
+                if self.1 < self.0.len() { " , .." } else { "" }
+            )?;
             return Ok(());
         }
         let mut dl = f.debug_list();
@@ -761,7 +818,7 @@ impl<'a> Display for FontFileNameFormatter<'a> {
             return dl.finish();
         }
         if self.1 < self.0.len() {
-            dl.entries(&self.0[0..self.1]);
+            dl.entries(&self.0[0 .. self.1]);
             dl.finish_non_exhaustive()
         } else {
             dl.entries(self.0);
@@ -779,12 +836,11 @@ struct FontFileFormatter<'a> {
     borderless: bool,
 }
 impl<'a> FontFileFormatter<'a> {
-    fn display_font_file(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let textwidth = if self.wrapped {
-            termwidth()
-        } else {
-            usize::MAX
-        };
+    fn display_font_file(
+        &self,
+        f: &mut std::fmt::Formatter<'_>,
+    ) -> std::fmt::Result {
+        let textwidth = if self.wrapped { termwidth() } else { usize::MAX };
         display_font_file(
             f,
             self.file.path.as_path(),
@@ -795,7 +851,10 @@ impl<'a> FontFileFormatter<'a> {
         )
     }
 
-    fn display_font_full(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn display_font_full(
+        &self,
+        f: &mut std::fmt::Formatter<'_>,
+    ) -> std::fmt::Result {
         let mut ds = f.debug_struct("Font Face");
 
         ds.field_with("Path", |fi| write!(fi, "{}", &self.file.path));
@@ -810,7 +869,7 @@ impl<'a> FontFileFormatter<'a> {
             ("Prefer Style", &self.file.prefer_style),
         ];
         let len = if self.very_simple { 1 } else { data.len() };
-        for (name, value) in &data[0..len] {
+        for (name, value) in &data[0 .. len] {
             ds.field_with(name, |fi| {
                 FontFileNameFormatter(value, self.max_list_len).fmt(fi)
             });
@@ -818,7 +877,10 @@ impl<'a> FontFileFormatter<'a> {
 
         if self.show_inst {
             ds.field("Style (fvar table)", &self.file.inst_style);
-            ds.field("Postscript names (fvar table)", &self.file.inst_postscript);
+            ds.field(
+                "Postscript names (fvar table)",
+                &self.file.inst_postscript,
+            );
             ds.field("fvar Instance", &self.file.inst_tuple);
             ds.finish()
         } else {
@@ -846,7 +908,8 @@ pub fn display_font_file_all_face<T: AsRef<Path>, W: std::fmt::Write>(
     styled: bool,
     borderless: bool,
 ) -> std::fmt::Result {
-    let path_str = &format!("{}", path.as_ref().to_string_lossy().replace('\\', "/"));
+    let path_str =
+        &format!("{}", path.as_ref().to_string_lossy().replace('\\', "/"));
     let mut data = vec![];
     let Ok(mut file) = File::open(path.as_ref()) else {
         log::error!(
@@ -856,7 +919,10 @@ pub fn display_font_file_all_face<T: AsRef<Path>, W: std::fmt::Write>(
         return Err(std::fmt::Error);
     };
     file.read_to_end(&mut data).map_err(|_| {
-        log::error!("Cannot read '{}' when display font information.", path_str);
+        log::error!(
+            "Cannot read '{}' when display font information.",
+            path_str
+        );
         std::fmt::Error
     })?;
     let Some(extension) = path.as_ref().extension() else {
@@ -873,7 +939,7 @@ pub fn display_font_file_all_face<T: AsRef<Path>, W: std::fmt::Write>(
         };
         cr.len()
     };
-    for index in 0..indices {
+    for index in 0 .. indices {
         display_font_data(
             f,
             Some(path_str),
@@ -905,10 +971,14 @@ pub fn display_font_file<T: AsRef<Path>, W: std::fmt::Write>(
         return Err(std::fmt::Error);
     };
     file.read_to_end(&mut data).map_err(|_| {
-        log::error!("Cannot read '{}' when display font information.", path_str);
+        log::error!(
+            "Cannot read '{}' when display font information.",
+            path_str
+        );
         std::fmt::Error
     })?;
-    let path_str = format!("{}", path.as_ref().to_string_lossy().replace('\\', "/"));
+    let path_str =
+        format!("{}", path.as_ref().to_string_lossy().replace('\\', "/"));
     display_font_data(
         f,
         Some(&path_str),
@@ -939,7 +1009,9 @@ pub fn display_font_data<W: std::fmt::Write>(
         })?
     } else {
         FontRef::from_index(&data, index).map_err(|_| {
-            log::error!("Cannot parse font data when display font information.");
+            log::error!(
+                "Cannot parse font data when display font information."
+            );
             std::fmt::Error
         })?
     };
@@ -967,15 +1039,18 @@ pub fn display_font_data<W: std::fmt::Write>(
         infostyle = infostyle.underline();
     }
 
+    log::info!("Current Locale: {}", SYS_LOCALE.as_str());
+
     // Start display
     if path.is_some() {
         writeln!(f, "{infostyle}{}{infostyle:#}", path.unwrap())?;
     }
 
-    let face_string = |id: NameId| match face.localized_strings(id).english_or_first() {
-        Some(ls) => ls.chars().collect(),
-        None => CompactString::new(""),
-    };
+    let face_string =
+        |id: NameId| match face.localized_strings(id).english_or_first() {
+            Some(ls) => ls.chars().collect(),
+            None => CompactString::new(""),
+        };
     let face_string_locales = |id: NameId| {
         let locale = SYS_LOCALE.as_str();
         if locale == "en-US" || locale == "en" {
@@ -983,47 +1058,62 @@ pub fn display_font_data<W: std::fmt::Write>(
         } else {
             let mut res = String::new();
             let mut best_rank = -1;
+            let mut locale_rank = -1;
             let mut best_string = None;
             let mut locale_string = None;
             let mut locale_locale = None;
             for (i, string) in face.localized_strings(id).enumerate() {
-                let rank = match string.language() {
+                let mut rank = -1;
+                let mut rank2 = -1;
+                let mut locale2 = String::new();
+                match string.language() {
                     Some(curr_locale) => {
                         log::info!("Locale: {}", curr_locale);
                         if curr_locale == locale {
-                            locale_string = Some(string);
-                            continue;
-                        } else if locale_string.is_none()
-                            && is_same_primary_language(curr_locale, locale)
+                            locale2 = curr_locale.to_owned();
+                            rank2 = 6;
+                        } else if (matches!(locale, "zh-CN" | "zh-SG")
+                            && curr_locale == "zh-Hans")
+                            || (matches!(locale, "zh-TW" | "zh-HK" | "zh-MO")
+                                && curr_locale == "zh-Hant")
                         {
-                            locale_locale = Some(curr_locale.to_owned());
-                            locale_string = Some(string);
-                            continue;
+                            locale2 = curr_locale.to_owned();
+                            rank2 = 5;
+                        } else if is_same_primary_language(curr_locale, locale)
+                        {
+                            locale2 = curr_locale.to_owned();
+                            rank2 = 3;
                         } else if curr_locale == "en-US" {
-                            4
+                            rank = 4;
                         } else if curr_locale == "en" {
-                            3
+                            rank = 3;
                         } else {
                             if i == 0 {
-                                0
+                                rank = 0;
                             } else {
                                 continue;
                             }
                         }
                     }
                     None => continue,
-                };
+                }
                 if rank > best_rank {
                     best_rank = rank;
                     best_string = Some(string);
+                } else if rank2 > locale_rank {
+                    locale_rank = rank2;
+                    locale_locale = Some(locale2);
+                    locale_string = Some(string);
                 }
             }
             match best_string {
                 Some(best_string) => {
                     res.push_str(&best_string.chars().collect::<String>());
                     if let Some(locale_string) = locale_string {
-                        let locale_string = locale_string.chars().collect::<String>();
-                        if !locale_string.is_empty() && &locale_string != &res {
+                        let locale_string =
+                            locale_string.chars().collect::<String>();
+                        if !locale_string.is_empty() && &locale_string != &res
+                        {
                             if !res.is_empty() {
                                 res.push_str(", ");
                             }
@@ -1081,13 +1171,14 @@ pub fn display_font_data<W: std::fmt::Write>(
     };
 
     // Border.
+    let border_line_len = textwidth.min(termwidth());
     if !borderless {
         print_data(
             "",
             &format!(
                 "{}{}{}",
                 TABLE_BORDER[0],
-                TABLE_BORDER[1].repeat(textwidth - 2),
+                TABLE_BORDER[1].repeat(border_line_len - 2),
                 TABLE_BORDER[2]
             ),
         )?;
@@ -1096,14 +1187,16 @@ pub fn display_font_data<W: std::fmt::Write>(
     if path.is_some() {
         let path_str = path.unwrap();
         if let Ok(metadata) = std::fs::metadata(path_str) {
-            let adj_byte = Byte::from_u64(metadata.len()).get_appropriate_unit(UnitType::Binary);
+            let adj_byte = Byte::from_u64(metadata.len())
+                .get_appropriate_unit(UnitType::Binary);
             print_data("Path", &format!("{} ({:.2})", path_str, adj_byte))?;
         } else {
             log::info!("Cannot get the metadata of file '{}'", path_str);
             print_data("Path", path_str)?;
         }
         if matches!(
-            &path_str[(path_str.rfind('.').unwrap_or(0) + 1)..path_str.len()],
+            &path_str
+                [(path_str.rfind('.').unwrap_or(0) + 1) .. path_str.len()],
             "ttc" | "TTC" | "otc" | "OTC"
         ) {
             print_data("Face Index", &index.to_string())?;
@@ -1163,7 +1256,9 @@ pub fn display_font_data<W: std::fmt::Write>(
     let is_symbol = is_symbol
         || face.cmap().is_ok_and(|v| {
             for r in v.encoding_records() {
-                if r.platform_id() == PlatformId::Windows && r.encoding_id() == 0 {
+                if r.platform_id() == PlatformId::Windows
+                    && r.encoding_id() == 0
+                {
                     return true;
                 }
             }
@@ -1197,7 +1292,8 @@ pub fn display_font_data<W: std::fmt::Write>(
             &OS2FsType::new(os2.version(), os2.fs_type()).permission(),
         )?;
         let (cls, sub) =
-            OS2SFamilyClass::new(os2.version(), os2.s_family_class()).class_and_subclass();
+            OS2SFamilyClass::new(os2.version(), os2.s_family_class())
+                .class_and_subclass();
         if !matches!(cls, "No Classification" | "RESERVED") {
             print_data(
                 "Font Family Class and Subclass",
@@ -1212,12 +1308,11 @@ pub fn display_font_data<W: std::fmt::Write>(
     let mut aval_tables = vec![];
     #[rustfmt::skip]
     const TABLE_TAGS: &[&[u8; 4]] = &[
-        b"avar", b"BASE", b"CBDT", b"CBLC", b"CFF ", b"CFF2", b"cmap", b"COLR", b"CPAL",
-        b"cvar", b"cvt ", b"DSIG", b"EBDT", b"EBLC", b"EBSC", b"fpgm", b"fvar", b"gasp",
-        b"GDEF", b"glyf", b"GPOS", b"GSUB", b"gvar", b"hdmx", b"head", b"hhea", b"hmtx",
-        b"HVAR", b"JSTF", b"kern", b"loca", b"LTSH", b"MATH", b"maxp", b"MERG", b"meta",
-        b"meta", b"MVAR", b"name", b"OS/2", b"PCLT", b"post", b"prep", b"sbix", b"STAT",
-        b"SVG ", b"VDMX", b"vhea", b"vmtx", b"VORG", b"VVAR",
+        b"avar", b"BASE", b"CBDT", b"CBLC", b"CFF ", b"CFF2", b"cmap", b"COLR", b"CPAL", b"cvar",
+        b"cvt ", b"DSIG", b"EBDT", b"EBLC", b"EBSC", b"fpgm", b"fvar", b"gasp", b"GDEF", b"glyf",
+        b"GPOS", b"GSUB", b"gvar", b"hdmx", b"head", b"hhea", b"hmtx", b"HVAR", b"JSTF", b"kern",
+        b"loca", b"LTSH", b"MATH", b"maxp", b"MERG", b"meta", b"MVAR", b"name", b"OS/2", b"PCLT",
+        b"post", b"prep", b"sbix", b"STAT", b"SVG ", b"VDMX", b"vhea", b"vmtx", b"VORG", b"VVAR",
     ];
     for &tag in TABLE_TAGS {
         if face.table_data(skrifa::Tag::new(tag)).is_some() {
@@ -1238,7 +1333,9 @@ pub fn display_font_data<W: std::fmt::Write>(
             for axis in axes {
                 let tag = axis.axis_tag();
                 match std::str::from_utf8(&tag.into_bytes()) {
-                    Ok(tag_str) => var_name_list.push(tag_str.to_compact_string()),
+                    Ok(tag_str) => {
+                        var_name_list.push(tag_str.to_compact_string())
+                    }
                     Err(_) => log::warn!("Cannot parse to str from {:?}", tag),
                 }
             }
@@ -1252,7 +1349,8 @@ pub fn display_font_data<W: std::fmt::Write>(
     let mut features_list = BTreeSet::new();
     let mut gsub_list = vec![];
     let mut gpos_list = vec![];
-    let mut scripts: IndexMap<[u8; 4], IndexMap<[u8; 4], BTreeSet<[u8; 4]>>> = IndexMap::new();
+    let mut scripts: IndexMap<[u8; 4], IndexMap<[u8; 4], BTreeSet<[u8; 4]>>> =
+        IndexMap::new();
     if let Ok(gsub) = face.gsub() {
         if let Ok(gsub_feat) = gsub.feature_list() {
             for feat in gsub_feat.feature_records() {
@@ -1267,9 +1365,12 @@ pub fn display_font_data<W: std::fmt::Write>(
             for scr in gsub_script.script_records() {
                 let script_tag = scr.script_tag().to_be_bytes();
                 if let Ok(sc) = scr.script(gsub_script.offset_data()) {
-                    let curr_script = scripts.entry(script_tag).or_insert(IndexMap::new());
+                    let curr_script =
+                        scripts.entry(script_tag).or_insert(IndexMap::new());
                     if let Some(Ok(dflt_lang_sys)) = sc.default_lang_sys() {
-                        let dflt = curr_script.entry(*b"DFLT").or_insert(BTreeSet::new());
+                        let dflt = curr_script
+                            .entry(*b"DFLT")
+                            .or_insert(BTreeSet::new());
                         for feat_idx in dflt_lang_sys.feature_indices() {
                             gsub_list
                                 .get(feat_idx.get() as usize)
@@ -1279,12 +1380,15 @@ pub fn display_font_data<W: std::fmt::Write>(
                     for lang in sc.lang_sys_records() {
                         let lang_tag = lang.lang_sys_tag().to_be_bytes();
                         if let Ok(lang_sys) = lang.lang_sys(sc.offset_data()) {
-                            let script_lang =
-                                curr_script.entry(lang_tag).or_insert(BTreeSet::new());
+                            let script_lang = curr_script
+                                .entry(lang_tag)
+                                .or_insert(BTreeSet::new());
                             for feat_idx in lang_sys.feature_indices() {
                                 gsub_list
                                     .get(feat_idx.get() as usize)
-                                    .and_then(|v| Some(script_lang.insert(*v)));
+                                    .and_then(|v| {
+                                        Some(script_lang.insert(*v))
+                                    });
                             }
                         }
                     }
@@ -1310,9 +1414,12 @@ pub fn display_font_data<W: std::fmt::Write>(
             for scr in gpos_script.script_records() {
                 let script_tag = scr.script_tag().to_be_bytes();
                 if let Ok(sc) = scr.script(gpos_script.offset_data()) {
-                    let curr_script = scripts.entry(script_tag).or_insert(IndexMap::new());
+                    let curr_script =
+                        scripts.entry(script_tag).or_insert(IndexMap::new());
                     if let Some(Ok(dflt_lang_sys)) = sc.default_lang_sys() {
-                        let dflt = curr_script.entry(*b"DFLT").or_insert(BTreeSet::new());
+                        let dflt = curr_script
+                            .entry(*b"DFLT")
+                            .or_insert(BTreeSet::new());
                         for feat_idx in dflt_lang_sys.feature_indices() {
                             gpos_list
                                 .get(feat_idx.get() as usize)
@@ -1322,12 +1429,15 @@ pub fn display_font_data<W: std::fmt::Write>(
                     for lang in sc.lang_sys_records() {
                         let lang_tag = lang.lang_sys_tag().to_be_bytes();
                         if let Ok(lang_sys) = lang.lang_sys(sc.offset_data()) {
-                            let script_lang =
-                                curr_script.entry(lang_tag).or_insert(BTreeSet::new());
+                            let script_lang = curr_script
+                                .entry(lang_tag)
+                                .or_insert(BTreeSet::new());
                             for feat_idx in lang_sys.feature_indices() {
                                 gpos_list
                                     .get(feat_idx.get() as usize)
-                                    .and_then(|v| Some(script_lang.insert(*v)));
+                                    .and_then(|v| {
+                                        Some(script_lang.insert(*v))
+                                    });
                             }
                         }
                     }
@@ -1401,14 +1511,16 @@ pub fn display_font_data<W: std::fmt::Write>(
                             if start == end && start.get() == 0xFFFF {
                                 break;
                             }
-                            for cp in start.get()..=end.get() {
+                            for cp in start.get() ..= end.get() {
                                 check_cp(u32::from(cp))
                             }
                         }
                     }
                     CmapSubtable::Format12(map12) => {
                         for group in map12.groups() {
-                            for cp in group.start_char_code()..=group.end_char_code() {
+                            for cp in group.start_char_code()
+                                ..= group.end_char_code()
+                            {
                                 check_cp(cp)
                             }
                         }
@@ -1462,7 +1574,7 @@ pub fn display_font_data<W: std::fmt::Write>(
             &format!(
                 "{}{}{}",
                 TABLE_BORDER[3],
-                TABLE_BORDER[4].repeat(textwidth - 2),
+                TABLE_BORDER[4].repeat(border_line_len - 2),
                 TABLE_BORDER[5]
             ),
         )?;
@@ -1539,7 +1651,7 @@ impl OS2SFamilyClass {
     fn class_and_subclass(&self) -> (&'static str, &'static str) {
         let [sub, cls] = self.0.to_le_bytes();
         match (cls, sub) {
-            (0, 0..=15) => ("No Classification", "NA"),
+            (0, 0 ..= 15) => ("No Classification", "NA"),
             (1, 0) => ("Oldstyle Serifs", "No Classification"),
             (1, 1) => ("Oldstyle Serifs", "IBM Rounded Legibility"),
             (1, 2) => ("Oldstyle Serifs", "Garalde"),
@@ -1549,17 +1661,17 @@ impl OS2SFamilyClass {
             (1, 6) => ("Oldstyle Serifs", "Dutch Traditional"),
             (1, 7) => ("Oldstyle Serifs", "Contemporary"),
             (1, 8) => ("Oldstyle Serifs", "Calligraphic"),
-            (1, 9..=14) => ("Oldstyle Serifs", "RESERVED"),
+            (1, 9 ..= 14) => ("Oldstyle Serifs", "RESERVED"),
             (1, 15) => ("Oldstyle Serifs", "Miscellaneous"),
             (2, 0) => ("Transitional Serifs", "No Classification"),
             (2, 1) => ("Transitional Serifs", "Direct Line"),
             (2, 2) => ("Transitional Serifs", "Script"),
-            (2, 3..=14) => ("Transitional Serifs", "RESERVED"),
+            (2, 3 ..= 14) => ("Transitional Serifs", "RESERVED"),
             (2, 15) => ("Transitional Serifs", "Miscellaneous"),
             (3, 0) => ("Modern Serifs", "No Classification"),
             (3, 1) => ("Modern Serifs", "Italian"),
             (3, 2) => ("Modern Serifs", "Script"),
-            (3, 3..=14) => ("Modern Serifs", "RESERVED"),
+            (3, 3 ..= 14) => ("Modern Serifs", "RESERVED"),
             (3, 15) => ("Modern Serifs", "Miscellaneous"),
             (4, 0) => ("Clarendon Serifs", "No Classification"),
             (4, 1) => ("Clarendon Serifs", "Clarendon"),
@@ -1569,7 +1681,7 @@ impl OS2SFamilyClass {
             (4, 5) => ("Clarendon Serifs", "Stub Serif"),
             (4, 6) => ("Clarendon Serifs", "Monotone"),
             (4, 7) => ("Clarendon Serifs", "Typewriter"),
-            (4, 8..=14) => ("Clarendon Serifs", "RESERVED"),
+            (4, 8 ..= 14) => ("Clarendon Serifs", "RESERVED"),
             (4, 15) => ("Clarendon Serifs", "Miscellaneous"),
             (5, 0) => ("Slab Serifs", "No Classification"),
             (5, 1) => ("Slab Serifs", "Monotone"),
@@ -1577,12 +1689,12 @@ impl OS2SFamilyClass {
             (5, 3) => ("Slab Serifs", "Geometric"),
             (5, 4) => ("Slab Serifs", "Swiss"),
             (5, 5) => ("Slab Serifs", "Typewriter"),
-            (5, 6..=14) => ("Slab Serifs", "RESERVED"),
+            (5, 6 ..= 14) => ("Slab Serifs", "RESERVED"),
             (5, 15) => ("Slab Serifs", "Miscellaneous"),
-            (6, 0..=15) => ("RESERVED", "NA"),
+            (6, 0 ..= 15) => ("RESERVED", "NA"),
             (7, 0) => ("Freeform Serifs", "No Classification"),
             (7, 1) => ("Freeform Serifs", "Modern"),
-            (7, 2..=14) => ("Freeform Serifs", "RESERVED"),
+            (7, 2 ..= 14) => ("Freeform Serifs", "RESERVED"),
             (7, 15) => ("Freeform Serifs", "Miscellaneous"),
             (8, 0) => ("Sans Serif", "No Classification"),
             (8, 1) => ("Sans Serif", "IBM Neo-grotesque Gothic"),
@@ -1591,17 +1703,17 @@ impl OS2SFamilyClass {
             (8, 4) => ("Sans Serif", "High-x Round Geometric"),
             (8, 5) => ("Sans Serif", "Neo-grotesque Gothic"),
             (8, 6) => ("Sans Serif", "Modified Neo-grotesque Gothic"),
-            (8, 7..=8) => ("Sans Serif", "RESERVED"),
+            (8, 7 ..= 8) => ("Sans Serif", "RESERVED"),
             (8, 9) => ("Sans Serif", "Typewriter Gothic"),
             (8, 10) => ("Sans Serif", "Matrix"),
-            (8, 11..=14) => ("Sans Serif", "RESERVED"),
+            (8, 11 ..= 14) => ("Sans Serif", "RESERVED"),
             (8, 15) => ("Sans Serif", "Miscellaneous"),
             (9, 0) => ("Ornamentals", "No Classification"),
             (9, 1) => ("Ornamentals", "Engraver"),
             (9, 2) => ("Ornamentals", "Black Letter"),
             (9, 3) => ("Ornamentals", "Decorative"),
             (9, 4) => ("Ornamentals", "Three Dimensional"),
-            (9, 5..=14) => ("Ornamentals", "Decorative"),
+            (9, 5 ..= 14) => ("Ornamentals", "Decorative"),
             (9, 15) => ("Ornamentals", "Miscellaneous"),
             (10, 0) => ("Scripts", "No Classification"),
             (10, 1) => ("Scripts", "Uncial"),
@@ -1612,20 +1724,20 @@ impl OS2SFamilyClass {
             (10, 6) => ("Scripts", "Brush Unjoined"),
             (10, 7) => ("Scripts", "Formal Joined"),
             (10, 8) => ("Scripts", "Monotone Joined"),
-            (10, 9..=14) => ("Scripts", "RESERVED"),
+            (10, 9 ..= 14) => ("Scripts", "RESERVED"),
             (10, 15) => ("Scripts", "Miscellaneous"),
-            (11, 0..=15) => ("RESERVED", "NA"),
+            (11, 0 ..= 15) => ("RESERVED", "NA"),
             (12, 0) => ("Symbolic", "No Classification"),
-            (12, 1..=2) => ("Symbolic", "RESERVED"),
+            (12, 1 ..= 2) => ("Symbolic", "RESERVED"),
             (12, 3) => ("Symbolic", "Mixed Serif"),
-            (12, 4..=5) => ("Symbolic", "RESERVED"),
+            (12, 4 ..= 5) => ("Symbolic", "RESERVED"),
             (12, 6) => ("Symbolic", "Oldstyle Serif"),
             (12, 7) => ("Symbolic", "Neo-grotesque Sans Serif"),
-            (12, 8..=14) => ("Symbolic", "RESERVED"),
+            (12, 8 ..= 14) => ("Symbolic", "RESERVED"),
             (12, 15) => ("Symbolic", "Miscellaneous"),
-            (13, 0..=15) => ("RESERVED", "NA"),
-            (14, 0..=15) => ("RESERVED", "NA"),
-            (15, 0..=15) => ("Miscellaneous", "NA"),
+            (13, 0 ..= 15) => ("RESERVED", "NA"),
+            (14, 0 ..= 15) => ("RESERVED", "NA"),
+            (15, 0 ..= 15) => ("Miscellaneous", "NA"),
             _ => unimplemented!("Invalid sFamilyClass value {}", self.0),
         }
     }
@@ -1637,7 +1749,7 @@ impl OS2Panose {
     fn new(sl: &[u8]) -> OS2Panose {
         assert_eq!(sl.len(), 10);
         let mut p = [0; 10];
-        p.copy_from_slice(&sl[0..10]);
+        p.copy_from_slice(&sl[0 .. 10]);
         OS2Panose(p)
     }
     fn is_serif(&self) -> bool {
@@ -1695,10 +1807,7 @@ impl FontLinks {
             Self::Map(map) => {
                 let mut vec = Vec::with_capacity(map.len());
                 map.into_iter().for_each(|(key, value)| {
-                    vec.push(FontLink {
-                        name: key,
-                        inst: value,
-                    });
+                    vec.push(FontLink { name: key, inst: value });
                 });
                 Self::Vec(vec)
             }
@@ -1722,19 +1831,13 @@ impl FontLinks {
         match self {
             Self::Map(map) => {
                 map.iter().for_each(|(name, inst)| {
-                    let link = FontLinkRef {
-                        name: name.as_str(),
-                        inst,
-                    };
+                    let link = FontLinkRef { name: name.as_str(), inst };
                     res.push(link);
                 });
             }
             Self::Vec(vec) => {
                 vec.iter().for_each(|FontLink { name, inst }| {
-                    let link = FontLinkRef {
-                        name: name.as_str(),
-                        inst,
-                    };
+                    let link = FontLinkRef { name: name.as_str(), inst };
                     res.push(link);
                 });
             }
@@ -1757,18 +1860,12 @@ impl FontLinks {
     /// Get iterator of FontLinks, only if the inner data is Map.
     pub fn iter_if_map(&self) -> Option<MapLinkIter> {
         match self {
-            FontLinks::Map(map) => Some(MapLinkIter {
-                link: map,
-                index: 0,
-            }),
+            FontLinks::Map(map) => Some(MapLinkIter { link: map, index: 0 }),
             FontLinks::Vec(_) => None,
         }
     }
     pub fn iter(&self) -> LinkIter {
-        LinkIter {
-            link: self,
-            index: 0,
-        }
+        LinkIter { link: self, index: 0 }
     }
 
     pub fn get_inst_by_index(&self, index: usize) -> Option<&Vec<u32>> {
@@ -1780,7 +1877,9 @@ impl FontLinks {
     pub fn get_inst_by_key(&self, key: &str) -> Option<&Vec<u32>> {
         match self {
             Self::Map(map) => map.get(key),
-            Self::Vec(vec) => vec.iter().find(|&v| v.name == key).map(|v| &v.inst),
+            Self::Vec(vec) => {
+                vec.iter().find(|&v| v.name == key).map(|v| &v.inst)
+            }
         }
     }
     pub fn get_index_by_key(&self, key: &str) -> Option<usize> {
@@ -1881,16 +1980,18 @@ impl<'a> Iterator for FileFuzzyIter<'a> {
             }
 
             match self.link_iter.next() {
-                Some((index, score)) => match self.database.link.get_inst_by_index(index) {
-                    Some(u32_vec) => {
-                        self.inst_index = Some(u32_vec);
-                        self.current_score = score;
-                        continue;
+                Some((index, score)) => {
+                    match self.database.link.get_inst_by_index(index) {
+                        Some(u32_vec) => {
+                            self.inst_index = Some(u32_vec);
+                            self.current_score = score;
+                            continue;
+                        }
+                        None => {
+                            continue;
+                        }
                     }
-                    None => {
-                        continue;
-                    }
-                },
+                }
                 None => {
                     return None;
                 }
@@ -1917,10 +2018,7 @@ impl<'a> Iterator for LinkIter<'a> {
                     Some((&val.name, &val.inst))
                 }
             }?;
-            Some(FontLinkRef {
-                name: link.0.as_str(),
-                inst: link.1,
-            })
+            Some(FontLinkRef { name: link.0.as_str(), inst: link.1 })
         } else {
             None
         }
@@ -1939,10 +2037,7 @@ impl<'a> Iterator for MapLinkIter<'a> {
             let index = self.index;
             self.index += 1;
             let link = self.link.get_index(index)?;
-            Some(FontLinkRef {
-                name: link.0.as_str(),
-                inst: link.1,
-            })
+            Some(FontLinkRef { name: link.0.as_str(), inst: link.1 })
         } else {
             None
         }
@@ -1981,7 +2076,11 @@ impl<'a> EscapedFormatter<'a> {
     }
 }
 impl Formatter for EscapedFormatter<'_> {
-    fn write_string_fragment<W>(&mut self, writer: &mut W, fragment: &str) -> io::Result<()>
+    fn write_string_fragment<W>(
+        &mut self,
+        writer: &mut W,
+        fragment: &str,
+    ) -> io::Result<()>
     where
         W: ?Sized + io::Write,
     {
@@ -2097,7 +2196,11 @@ impl Formatter for EscapedFormatter<'_> {
         self.0.write_f64(writer, value)
     }
 
-    fn write_number_str<W>(&mut self, writer: &mut W, value: &str) -> io::Result<()>
+    fn write_number_str<W>(
+        &mut self,
+        writer: &mut W,
+        value: &str,
+    ) -> io::Result<()>
     where
         W: ?Sized + io::Write,
     {
@@ -2129,7 +2232,11 @@ impl Formatter for EscapedFormatter<'_> {
         self.0.write_char_escape(writer, char_escape)
     }
 
-    fn write_byte_array<W>(&mut self, writer: &mut W, value: &[u8]) -> io::Result<()>
+    fn write_byte_array<W>(
+        &mut self,
+        writer: &mut W,
+        value: &[u8],
+    ) -> io::Result<()>
     where
         W: ?Sized + io::Write,
     {
@@ -2150,7 +2257,11 @@ impl Formatter for EscapedFormatter<'_> {
         self.0.end_array(writer)
     }
 
-    fn begin_array_value<W>(&mut self, writer: &mut W, first: bool) -> io::Result<()>
+    fn begin_array_value<W>(
+        &mut self,
+        writer: &mut W,
+        first: bool,
+    ) -> io::Result<()>
     where
         W: ?Sized + io::Write,
     {
@@ -2178,7 +2289,11 @@ impl Formatter for EscapedFormatter<'_> {
         self.0.end_object(writer)
     }
 
-    fn begin_object_key<W>(&mut self, writer: &mut W, first: bool) -> io::Result<()>
+    fn begin_object_key<W>(
+        &mut self,
+        writer: &mut W,
+        first: bool,
+    ) -> io::Result<()>
     where
         W: ?Sized + io::Write,
     {
@@ -2206,7 +2321,11 @@ impl Formatter for EscapedFormatter<'_> {
         self.0.end_object_value(writer)
     }
 
-    fn write_raw_fragment<W>(&mut self, writer: &mut W, fragment: &str) -> io::Result<()>
+    fn write_raw_fragment<W>(
+        &mut self,
+        writer: &mut W,
+        fragment: &str,
+    ) -> io::Result<()>
     where
         W: ?Sized + io::Write,
     {

@@ -1,31 +1,36 @@
 use std::collections::HashSet;
 use std::env::current_exe;
 use std::fs::{self, File};
-use std::io::{self, BufReader, BufWriter};
+use std::io::{self, BufReader, BufWriter, Read};
 use std::iter::{empty, zip};
-use std::path::{Path, PathBuf};
+use std::path::{absolute as absolute_path, Path, PathBuf};
 use std::str::FromStr;
 use std::time;
 
 use clap::ArgMatches;
 use config;
-use log::{info, warn};
+use log::{info, trace, warn};
+use memchr::memchr;
 use rayon::prelude::*;
+use texhigh::tokenlist::{SourcedFormatter, SourcedTokenList};
+use texhigh::types::ErrorKind;
 use texhigh::{
     config::{HighConfig, THConfig},
     fonts::{
-        display_font_file_all_face, similarity_bytes, FontDatabase, FontFile, DEFAULT_DATA_PATH,
+        display_font_file_all_face, similarity_bytes, FontDatabase, FontFile,
+        DEFAULT_DATA_PATH,
     },
     get_kpse_matches, get_matches,
     high::{HWrite, StandardFormatter},
     layout::{self, OutputFormat},
-    types::{CTabSet, CatcodeStack, TokenList},
+    types::{CTabSet, CatCodeStack, TokenList},
     KpseWhich,
 };
 use textwrap::termwidth;
 
 #[cfg(not(debug_assertions))]
 use mimalloc::MiMalloc;
+use unicode_properties::UnicodeGeneralCategory;
 #[cfg(not(debug_assertions))]
 #[global_allocator]
 static GLOBAL: MiMalloc = MiMalloc;
@@ -41,6 +46,23 @@ fn main() {
     }
 }
 
+enum Formatter<'s> {
+    Standard(StandardFormatter<'s>),
+    Sourced(SourcedFormatter<'s>),
+}
+
+impl Formatter<'_> {
+    pub fn format_now<T: HWrite>(
+        &self,
+        stream: &mut T,
+    ) -> Result<(), ErrorKind> {
+        match self {
+            Self::Standard(s) => s.format_now(stream),
+            Self::Sourced(s) => s.format_now(stream),
+        }
+    }
+}
+
 fn command_high(m: &ArgMatches) {
     let th_config = get_thconfig(&m);
 
@@ -49,10 +71,12 @@ fn command_high(m: &ArgMatches) {
     let ctab = ctabset
         .get_by_name(ctab_name)
         .expect("Unknown currant catcode table name.");
-    let mut ctabs = CatcodeStack::new();
+    info!(target: "Highlight Config", "Current ctab: {}", ctab_name);
+    let mut ctabs = CatCodeStack::new();
     match th_config.high_config.ctabs_fallback.get(ctab_name) {
         Some(ctab_name_vec) => {
-            for ctab_name in ctab_name_vec.iter().next_back().into_iter() {
+            info!(target: "Highlight Config", "Current ctab fallbacks: [{}]", ctab_name_vec.join(", "));
+            for ctab_name in ctab_name_vec.iter().rev() {
                 match ctabset.get_by_name(ctab_name) {
                     Some(ctab_fallback) => {
                         ctabs.push(ctab_fallback);
@@ -69,8 +93,15 @@ fn command_high(m: &ArgMatches) {
 
     let mut tokenlist_vec: Vec<(String, bool)> = Vec::new();
     if m.contains_id("text") {
-        let text = get_command_str(m, "text").to_string();
+        let text = get_command_str(m, "text");
         tokenlist_vec.push((text, false));
+    } else if m.contains_id("text-base64") {
+        let text = get_command_str(m, "text-base64");
+        if let Ok(text) = base64_decode(&text) {
+            tokenlist_vec.push((text, false));
+        } else {
+            warn!("Invalid Base 64 string of text: '{}'", &text);
+        }
     } else if m.contains_id("file") {
         let fna: Vec<Vec<&String>> = m
             .get_occurrences("file")
@@ -83,34 +114,129 @@ fn command_high(m: &ArgMatches) {
             }
         }
     };
+
+    let enhanced = m.get_flag("enhanced");
+
+    let replace_tab = |s: String| -> String {
+        if th_config.high_config.tabs_len.0 == 0
+            || (th_config.high_config.replace_tab
+                && memchr(b'\t', s.as_bytes()).is_some())
+        {
+            if th_config.high_config.tabs_len.0 > 1 {
+                let tabs_len = th_config.high_config.tabs_len.0 as usize;
+                s.replace('\t', &" ".repeat(tabs_len))
+            } else {
+                s.replace('\t', " ")
+            }
+        } else {
+            s
+        }
+    };
+    let keep_necessary = |s: String| -> String {
+        if th_config.high_config.lines == [0, 0]
+            && (th_config.high_config.gobble.0 == 0 || !s.starts_with(' '))
+        {
+            return s;
+        }
+        if th_config.high_config.lines == [0, 0] {
+            let gobble = if th_config.high_config.gobble.0 > 0 {
+                th_config.high_config.gobble.0 as usize
+            } else {
+                let mut gobble = 0;
+                for &b in s.as_bytes() {
+                    if b == b' ' {
+                        // skip first U+20
+                        gobble += 1;
+                    } else {
+                        break;
+                    }
+                }
+                gobble
+            };
+            s.lines()
+                .map(|v| v.chars().skip(gobble).collect::<String>())
+                .collect::<Vec<_>>()
+                .join("\n")
+        } else {
+            let line_start = th_config.high_config.lines[0] as usize;
+            let line_end = th_config.high_config.lines[1] as usize;
+            if line_end < line_start {
+                return String::new();
+            }
+            let line_count = line_end - line_start;
+            let lines = s
+                .lines()
+                .skip(line_start - if line_start > 0 { 1 } else { 0 });
+            let gobble = if th_config.high_config.gobble.0 > 0 {
+                th_config.high_config.gobble.0 as usize
+            } else {
+                let gobble_line = if let Some(l) = lines.clone().next() {
+                    let mut gobble = 0;
+                    for &b in l.as_bytes() {
+                        if b == b' ' {
+                            // skip first U+20
+                            gobble += 1;
+                        } else {
+                            break;
+                        }
+                    }
+                    gobble
+                } else {
+                    // no more lines
+                    return String::new();
+                };
+                gobble_line
+            };
+            lines
+                .take(line_count)
+                .map(|v| v.chars().skip(gobble).collect::<String>())
+                .collect::<Vec<_>>()
+                .join("\n")
+        }
+    };
+
     let mut fm_vec = Vec::new();
     for (f_or_s, is_file) in tokenlist_vec.iter() {
         let (tokenlist_str, file_size) = if *is_file {
-            let f_path = File::open(f_or_s).expect("Unable open tokenlist file");
+            let f_path =
+                File::open(f_or_s).expect("Unable open tokenlist file");
             let f_len = f_path.metadata().unwrap().len();
             let mut f = BufReader::new(f_path);
-            let s = io::read_to_string(&mut f).expect("Unable read tokenlist file");
-            if th_config.high_config.tab_to_spaces && s.contains('\t') {
-                (
-                    s.replace('\t', &" ".repeat(th_config.high_config.tabs_len as usize)),
-                    f_len,
-                )
-            } else {
-                (s, f_len)
-            }
+            let s = io::read_to_string(&mut f)
+                .expect("Unable read tokenlist file");
+            (keep_necessary(replace_tab(s)), f_len)
         } else {
-            if th_config.high_config.tab_to_spaces && f_or_s.contains('\t') {
-                (
-                    f_or_s.replace('\t', &" ".repeat(th_config.high_config.tabs_len as usize)),
-                    u64::MIN,
-                )
-            } else {
-                (f_or_s.to_owned(), u64::MIN)
-            }
+            (keep_necessary(replace_tab(f_or_s.to_owned())), u64::MIN)
         };
-        let tokenlist = TokenList::parse(tokenlist_str, &ctabs);
-        let fm = StandardFormatter::new(&th_config.high_config, tokenlist);
-        fm_vec.push((fm, if *is_file { f_or_s } else { "" }, file_size));
+        if enhanced {
+            let ctabs_len = ctabs.len();
+            let tokenlist = SourcedTokenList::parse(
+                tokenlist_str.into(),
+                &mut ctabs,
+                (&th_config.high_config.lexer, ctabset),
+            );
+            ctabs.truncate(ctabs_len);
+            let fm = SourcedFormatter::new(
+                &th_config.high_config,
+                tokenlist.into(),
+            );
+            fm_vec.push((
+                Formatter::Sourced(fm),
+                if *is_file { f_or_s } else { "" },
+                file_size,
+            ));
+        } else {
+            let tokenlist = TokenList::parse(&tokenlist_str, &ctabs);
+            let fm = StandardFormatter::new(
+                &th_config.high_config,
+                tokenlist.into(),
+            );
+            fm_vec.push((
+                Formatter::Standard(fm),
+                if *is_file { f_or_s } else { "" },
+                file_size,
+            ));
+        }
     }
 
     if m.contains_id("output") {
@@ -119,6 +245,12 @@ fn command_high(m: &ArgMatches) {
             let fm = &fm_vec[0].0;
             let buffer_size = get_buffer_size(fm_vec[0].2);
             info!(target: "Output", "Writing to {}, buffer size {}", out.as_os_str().to_string_lossy(), buffer_size);
+            if let Some(parent) = out.parent() {
+                fs::create_dir_all(parent).expect(&format!(
+                    "Cannot create directory '{}'",
+                    parent.display()
+                ));
+            }
             let mut f = BufWriter::with_capacity(
                 buffer_size,
                 fs::File::create(out).expect("Unable open output file"),
@@ -126,7 +258,10 @@ fn command_high(m: &ArgMatches) {
             fm.format_now(&mut f).unwrap();
         } else {
             if !out.exists() || out.is_file() {
-                fs::create_dir_all(out).unwrap();
+                fs::create_dir_all(out).expect(&format!(
+                    "Cannot create directory '{}'",
+                    out.display()
+                ));
             }
             for (fm, file, file_size) in fm_vec.iter() {
                 let file_path = out.join(*file);
@@ -135,14 +270,18 @@ fn command_high(m: &ArgMatches) {
                     if !out.as_os_str().is_empty()
                         && (!file_parent.exists() || file_parent.is_file())
                     {
-                        fs::create_dir_all(file_parent).unwrap();
+                        fs::create_dir_all(file_parent).expect(&format!(
+                            "Cannot create directory '{}'",
+                            out.display()
+                        ));
                     }
                 }
                 let buffer_size = get_buffer_size(*file_size);
                 info!(target: "Output", "Writing to {}, buffer size {}", file, buffer_size);
                 let mut f = BufWriter::with_capacity(
                     buffer_size,
-                    fs::File::create(&file_path).expect("Unable open output file"),
+                    fs::File::create(&file_path)
+                        .expect("Unable open output file"),
                 );
                 fm.format_now(&mut f).unwrap();
             }
@@ -158,19 +297,23 @@ fn command_high(m: &ArgMatches) {
 fn get_thconfig(m: &ArgMatches) -> THConfig {
     let mut th_config = THConfig::new();
 
-    th_config
-        .ctabs
-        .extend(CTabSet::from_str(include_str!("prelude-ctabset.thcs")).unwrap());
+    th_config.ctabs.extend(
+        CTabSet::from_str(include_str!("prelude-ctabset.thcs")).unwrap(),
+    );
     th_config.high_config = get_highconfig(m);
+    trace!("{:?}", &th_config.high_config);
 
     let mut ctab_list: Vec<(usize, CTabSet)> = vec![];
 
     if m.contains_id("ctab-set") {
         let ctab_set_str = m.get_many::<String>("ctab-set").unwrap();
-        let ctab_set_indices = m.indices_of("ctab-set").unwrap().collect::<Vec<_>>();
-        let mut ctab_set: Vec<CTabSet> = Vec::with_capacity(ctab_set_indices.len());
+        let ctab_set_indices =
+            m.indices_of("ctab-set").unwrap().collect::<Vec<_>>();
+        let mut ctab_set: Vec<CTabSet> =
+            Vec::with_capacity(ctab_set_indices.len());
         for ct in ctab_set_str {
-            ctab_set.push(CTabSet::from_str(ct).expect("Cannot parse ctabset"));
+            ctab_set
+                .push(CTabSet::from_str(ct).expect("Cannot parse ctabset"));
         }
         ctab_list.extend(zip(ctab_set_indices, ctab_set));
     }
@@ -180,12 +323,49 @@ fn get_thconfig(m: &ArgMatches) -> THConfig {
             .unwrap()
             .map(Iterator::collect)
             .collect();
-        let ctab_set_indices = m.indices_of("ctab").unwrap().step_by(2).collect::<Vec<_>>();
-        let mut ctab_set: Vec<CTabSet> = Vec::with_capacity(ctab_set_indices.len());
+        let ctab_set_indices =
+            m.indices_of("ctab").unwrap().step_by(2).collect::<Vec<_>>();
+        let mut ctab_set: Vec<CTabSet> =
+            Vec::with_capacity(ctab_set_indices.len());
         unsafe {
             for ct in ctab_set_str {
-                let s = format!("[{}] {}", ct.get_unchecked(0), ct.get_unchecked(1));
-                ctab_set.push(CTabSet::from_str(&s).expect("Cannot parse ctab"));
+                let s = format!(
+                    "[{}] {}",
+                    ct.get_unchecked(0),
+                    ct.get_unchecked(1)
+                );
+                ctab_set
+                    .push(CTabSet::from_str(&s).expect("Cannot parse ctab"));
+            }
+        }
+        ctab_list.extend(zip(ctab_set_indices, ctab_set));
+    }
+    if m.contains_id("ctab-base64") {
+        let ctab_set_str: Vec<Vec<&String>> = m
+            .get_occurrences("ctab-base64")
+            .unwrap()
+            .map(Iterator::collect)
+            .collect();
+        let ctab_set_indices = m
+            .indices_of("ctab-base64")
+            .unwrap()
+            .step_by(2)
+            .collect::<Vec<_>>();
+        let mut ctab_set: Vec<CTabSet> =
+            Vec::with_capacity(ctab_set_indices.len());
+        for ct in ctab_set_str {
+            let ctab_value = unsafe { ct.get_unchecked(1) };
+            if let Ok(ctab_value) = base64_decode(normalize_quote(ctab_value))
+            {
+                let s = format!(
+                    "[{}] {}",
+                    unsafe { ct.get_unchecked(0) },
+                    ctab_value
+                );
+                ctab_set
+                    .push(CTabSet::from_str(&s).expect("Cannot parse ctab"));
+            } else {
+                warn!("Invalid Base 64 string: '{}'", ctab_value);
             }
         }
         ctab_list.extend(zip(ctab_set_indices, ctab_set));
@@ -193,12 +373,15 @@ fn get_thconfig(m: &ArgMatches) -> THConfig {
     if m.contains_id("ctab-file") {
         let ctab_set_fn = m.get_many::<String>("ctab-file").unwrap();
         let ctab_set_indices = m.indices_of("ctab-file").unwrap();
-        let mut ctab_set: Vec<CTabSet> = Vec::with_capacity(ctab_set_indices.len());
+        let mut ctab_set: Vec<CTabSet> =
+            Vec::with_capacity(ctab_set_indices.len());
         for ct in ctab_set_fn {
             info!(target: "Finding ctab-file", "{}", ct);
-            let mut f = BufReader::new(File::open(ct).expect("Unknown ctab-file"));
+            let mut f =
+                BufReader::new(File::open(ct).expect("Unknown ctab-file"));
             let s = io::read_to_string(&mut f).expect("Unable read ctab-file");
-            ctab_set.push(CTabSet::from_str(&s).expect("Cannot parse ctab-file"));
+            ctab_set
+                .push(CTabSet::from_str(&s).expect("Cannot parse ctab-file"));
         }
         ctab_list.extend(zip(ctab_set_indices, ctab_set));
     }
@@ -216,9 +399,7 @@ fn get_highconfig(m: &ArgMatches) -> HighConfig {
     let use_kpse = m.get_flag("kpse-config-file");
     let kpse = if m.contains_id("kpse-args") {
         let kpse_m = get_kpse_matches(
-            m.get_many::<String>("kpse-args")
-                .unwrap()
-                .collect::<Vec<_>>(),
+            m.get_many::<String>("kpse-args").unwrap().collect::<Vec<_>>(),
         );
         KpseWhich::from_matches(&kpse_m)
     } else {
@@ -236,8 +417,10 @@ fn get_highconfig(m: &ArgMatches) -> HighConfig {
             .unwrap()
             .map(|s| s.to_string())
             .collect::<Vec<_>>();
-        let config_indices = m.indices_of("config-file").unwrap().collect::<Vec<_>>();
-        zip(config_indices, con_file).for_each(|(c, i)| config_list.push((c, i, true)));
+        let config_indices =
+            m.indices_of("config-file").unwrap().collect::<Vec<_>>();
+        zip(config_indices, con_file)
+            .for_each(|(c, i)| config_list.push((c, i, true)));
     }
     if m.contains_id("config") {
         let mut con = Vec::new();
@@ -252,12 +435,38 @@ fn get_highconfig(m: &ArgMatches) -> HighConfig {
                 normalize_quote(unsafe { k.get_unchecked(1) })
             ));
         }
+        let config_indices =
+            m.indices_of("config").unwrap().step_by(2).collect::<Vec<_>>();
+        zip(config_indices, con)
+            .for_each(|(c, i)| config_list.push((c, i, false)));
+    }
+    if m.contains_id("config-base64") {
+        let mut con = Vec::new();
+        for k in m
+            .get_occurrences::<String>("config-base64")
+            .unwrap()
+            .map(Iterator::collect::<Vec<_>>)
+        {
+            let config_value = normalize_quote(unsafe { k.get_unchecked(1) });
+            if let Ok(config_value) =
+                base64_decode(normalize_quote(config_value))
+            {
+                con.push(format!(
+                    "{} = {}",
+                    unsafe { k.get_unchecked(0) },
+                    config_value
+                ));
+            } else {
+                warn!("Invalid Base 64 string: '{}'", config_value);
+            }
+        }
         let config_indices = m
-            .indices_of("config")
+            .indices_of("config-base64")
             .unwrap()
             .step_by(2)
             .collect::<Vec<_>>();
-        zip(config_indices, con).for_each(|(c, i)| config_list.push((c, i, false)));
+        zip(config_indices, con)
+            .for_each(|(c, i)| config_list.push((c, i, false)));
     }
     config_list.sort_by_key(|(i, _, _)| *i);
     for (_, config_str, is_file) in config_list.iter() {
@@ -267,29 +476,34 @@ fn get_highconfig(m: &ArgMatches) -> HighConfig {
                     Ok(source) => {
                         for f in &source {
                             info!(target: "Finding config file", "{}", f);
-                            config = config.add_source(File::new(f, FileFormat::Toml));
+                            config = config
+                                .add_source(File::new(f, FileFormat::Toml));
                         }
                     }
-                    Err(_) => warn!(target: "Finding config file", "Unknown file: {}", config_str),
+                    Err(_) => {
+                        warn!(target: "Finding config file", "Unknown file: {}", config_str)
+                    }
                 }
             } else {
                 info!(target: "Finding config file", "{}", config_str);
-                config = config.add_source(File::new(config_str, FileFormat::Toml));
+                config =
+                    config.add_source(File::new(config_str, FileFormat::Toml));
             }
         } else {
-            config = config.add_source(File::from_str(config_str, FileFormat::Toml));
+            config = config
+                .add_source(File::from_str(config_str, FileFormat::Toml));
         }
     }
     config
         .build()
         .expect("Cannot parse configs")
         .try_deserialize()
-        .unwrap()
+        .expect("Invalid config value")
 }
 
 fn get_buffer_size(file_size: u64) -> usize {
     if file_size < 80_000 {
-        8_000
+        8192
     } else if file_size < 800_000 {
         32_000
     } else {
@@ -300,7 +514,8 @@ fn get_buffer_size(file_size: u64) -> usize {
 fn command_font(m: &ArgMatches) {
     match m.subcommand() {
         Some(("build", cmd_m)) => {
-            let paths: Vec<&String> = cmd_m.get_many("paths").unwrap_or_default().collect();
+            let paths: Vec<&String> =
+                cmd_m.get_many("paths").unwrap_or_default().collect();
             let status = build_db(&paths, !cmd_m.get_flag("no-default-paths"));
             if !status {
                 println!("Failed to build Font Database");
@@ -335,6 +550,15 @@ where
         paths
     }
 
+    let paths = paths.into_iter().filter_map(|p| {
+        if let Ok(path) = absolute_path(p.as_ref()) {
+            Some(path)
+        } else {
+            warn!("Invalid path '{}'", p.as_ref().display());
+            None
+        }
+    });
+
     let timer = time::Instant::now();
     let db = if default {
         #[cfg(target_os = "windows")]
@@ -342,7 +566,8 @@ where
         #[cfg(target_os = "macos")]
         let sys_font_paths = vec!["/Library/Fonts", "/System/Library/Fonts"];
         #[cfg(not(any(target_os = "windows", target_os = "macos")))]
-        let sys_font_paths = vec!["/usr/local/share/fonts", "/usr/share/fonts"];
+        let sys_font_paths =
+            vec!["/usr/local/share/fonts", "/usr/share/fonts"];
 
         // TODO: Need to use kpathsea/cpathsea to get truetype and opentype directories,
         // and remove the use of normalize_kpse_paths
@@ -354,11 +579,15 @@ where
         let is_in_tex_bin_dir = kpse_path.map_or(false, |p| p.exists());
         let tex_truetype_paths = if is_in_tex_bin_dir {
             let mut res = vec![];
-            if let Some(texmf_dist_dir) = KpseWhich::var_value("TEXMFDIST", false) {
+            if let Some(texmf_dist_dir) =
+                KpseWhich::var_value("TEXMFDIST", false)
+            {
                 res.push(format!("{}/fonts/truetype", &texmf_dist_dir));
                 res.push(format!("{}/fonts/opentype", &texmf_dist_dir));
             }
-            if let Some(texmf_local_dir) = KpseWhich::var_value("TEXMFLOCAL", false) {
+            if let Some(texmf_local_dir) =
+                KpseWhich::var_value("TEXMFLOCAL", false)
+            {
                 res.push(format!("{}/fonts/truetype", &texmf_local_dir));
                 res.push(format!("{}/fonts/opentype", &texmf_local_dir));
             }
@@ -370,13 +599,9 @@ where
         let input_paths = paths.into_iter();
 
         println!("Finding truetype fonts from: [");
-        tex_truetype_paths
-            .iter()
-            .for_each(|p| println!("    {},", p));
+        tex_truetype_paths.iter().for_each(|p| println!("    {},", p));
         sys_font_paths.iter().for_each(|p| println!("    {},", p));
-        input_paths
-            .clone()
-            .for_each(|p| println!("    {},", p.as_ref().display()));
+        input_paths.clone().for_each(|p| println!("    {},", p.display()));
         println!("]");
 
         let mut db = FontDatabase::new_from_paths(&tex_truetype_paths);
@@ -386,9 +611,7 @@ where
     } else {
         let input_paths = paths.into_iter();
         println!("Finding truetype fonts from: [");
-        input_paths
-            .clone()
-            .for_each(|p| println!("    {},", p.as_ref().display()));
+        input_paths.clone().for_each(|p| println!("    {},", p.display()));
         println!("]");
         FontDatabase::new_from_paths(input_paths)
     };
@@ -436,15 +659,13 @@ fn find_font(db: &FontDatabase, cmd_m: &ArgMatches) {
         f.family.contains(n) || f.full.contains(n) || f.postscript.contains(n)
     };
 
-    let fontname = &get_command_str_except(cmd_m, "name", "Require a font name");
+    let fontname =
+        &get_command_str_except(cmd_m, "name", "Require a font name");
 
     if cmd_m.get_flag("local") {
         println!("Read font from '{}'", fontname);
-        let textwidth = if cmd_m.get_flag("unwrapped") {
-            usize::MAX
-        } else {
-            termwidth()
-        };
+        let textwidth =
+            if cmd_m.get_flag("unwrapped") { usize::MAX } else { termwidth() };
         let mut res = String::new();
         display_font_file_all_face(
             &mut res,
@@ -459,21 +680,22 @@ fn find_font(db: &FontDatabase, cmd_m: &ArgMatches) {
     }
 
     let only_family = cmd_m.get_flag("only-family");
-    let fmt_method: Box<dyn Fn(&FontFile) -> String> = if cmd_m.get_flag("info") {
-        Box::new(|ff| {
-            FontFile::display_info_with(
-                ff,
-                !cmd_m.get_flag("unwrapped"),
-                cmd_m.get_flag("borderless"),
-            )
-        })
-    } else if cmd_m.get_flag("full") {
-        Box::new(FontFile::display_full)
-    } else if cmd_m.get_flag("short") {
-        Box::new(FontFile::display_short)
-    } else {
-        Box::new(FontFile::display_simple)
-    };
+    let fmt_method: Box<dyn Fn(&FontFile) -> String> =
+        if cmd_m.get_flag("info") {
+            Box::new(|ff| {
+                FontFile::display_info_with(
+                    ff,
+                    !cmd_m.get_flag("unwrapped"),
+                    cmd_m.get_flag("borderless"),
+                )
+            })
+        } else if cmd_m.get_flag("full") {
+            Box::new(FontFile::display_full)
+        } else if cmd_m.get_flag("short") {
+            Box::new(FontFile::display_short)
+        } else {
+            Box::new(FontFile::display_simple)
+        };
 
     if let Some(extension) = Path::new(fontname).extension() {
         if let Some(extension) = extension.to_str() {
@@ -494,7 +716,8 @@ fn find_font(db: &FontDatabase, cmd_m: &ArgMatches) {
                                 .unwrap_or_default()
                                 .to_str()
                                 .unwrap_or_default();
-                            if font_extension.to_ascii_lowercase().as_str() == extension
+                            if font_extension.to_ascii_lowercase().as_str()
+                                == extension
                                 && font_path.file_stem() == target_stem
                             {
                                 if let Some(font_dir) = font_path.parent() {
@@ -517,7 +740,8 @@ fn find_font(db: &FontDatabase, cmd_m: &ArgMatches) {
                                 .unwrap_or_default()
                                 .to_str()
                                 .unwrap_or_default();
-                            font_extension.to_ascii_lowercase().as_str() == extension
+                            font_extension.to_ascii_lowercase().as_str()
+                                == extension
                                 && font_path.file_stem() == target_stem
                         })
                         .collect::<Vec<_>>()
@@ -546,11 +770,12 @@ fn find_font(db: &FontDatabase, cmd_m: &ArgMatches) {
                     name.starts_with(fontname)
                 } else {
                     let min = fontname.len();
-                    let extra_len = name.as_bytes()[0..min]
+                    let extra_len = name.as_bytes()[0 .. min]
                         .iter()
                         .filter(|&&v| v == b' ')
                         .count();
-                    let the_name = &name.as_bytes()[0..name.len().min(min + extra_len)];
+                    let the_name =
+                        &name.as_bytes()[0 .. name.len().min(min + extra_len)];
                     !(similarity_bytes(fontname.as_bytes(), the_name) < fuzzy)
                 }
             })
@@ -616,7 +841,9 @@ fn command_layout(m: &ArgMatches) {
     let width = *m.get_one::<f32>("width").unwrap_or(&0.0);
     let mut fonts = vec![];
     if let Some(font_ref) = m.get_many::<String>("fonts") {
-        font_ref.for_each(|v| fonts.extend(normalize_quote(v).split(',')));
+        font_ref.for_each(|v| {
+            fonts.extend(normalize_quote(v).split(',').map(|s| s.trim_ascii()))
+        });
     }
 
     let dbfile = DEFAULT_DATA_PATH
@@ -654,7 +881,15 @@ fn command_layout(m: &ArgMatches) {
     lay.font_size = font_size;
     lay.line_height = line_height;
     lay.text_width = width;
-    let geometry = lay.layout(&get_command_str(m, "text"));
+    let text = get_command_str(m, "text");
+    let geometry = if m.get_flag("base64") {
+        lay.layout(
+            &base64_decode(&text)
+                .expect(&format!("Invalid Base 64 text: '{}'", &text)),
+        )
+    } else {
+        lay.layout(&text)
+    };
 
     if let Err(e) = lay.output(&geometry, &mut form) {
         eprintln!("Cannot layout text, cause {}", e);
@@ -665,12 +900,21 @@ fn command_text(m: &ArgMatches) {
     use regex::{Captures, Regex};
     use unicode_linebreak::linebreaks;
     use unicode_names2::name as uni_name;
+    use unicode_normalization::UnicodeNormalization;
     use unicode_script::UnicodeScript;
     use unicode_segmentation::UnicodeSegmentation;
     use yeslogic_unicode_blocks::find_unicode_block;
 
-    let text = &get_command_str(m, "text");
-    let escaped = m.get_flag("escaped");
+    let ref raw_text = if m.contains_id("text") {
+        get_command_str(m, "text")
+    } else {
+        let mut res = String::new();
+        io::stdin()
+            .read_to_string(&mut res)
+            .expect("Cannot parse text from stdin");
+        res.trim_ascii_end().to_owned()
+    };
+    let escaped = m.get_flag("to-unicode");
     let printer: Box<dyn Fn(&str) -> String> = if escaped {
         Box::new(|s: &str| {
             let mut res = String::new();
@@ -683,14 +927,14 @@ fn command_text(m: &ArgMatches) {
         Box::new(|s: &str| format!("{:?}", s))
     };
 
-    let from_uni_re = Regex::new(r"\\u(\{[[:xdigit:]]{1,8}\}|[[:xdigit:]]{1,8})").unwrap();
-    let to_uni_re = Regex::new(r"(.)").unwrap();
+    let from_uni_re =
+        Regex::new(r"\\u\{([[:xdigit:]]{1,8})\}|\\u([[:xdigit:]]{1,8})")
+            .unwrap();
     let from_uni_seq = |s: &str| {
         from_uni_re
             .replace_all(s, |c: &Captures<'_>| {
-                let s = c[1].to_string();
-                let start = s.starts_with('{') as usize;
-                match u32::from_str_radix(&s[start..s.len() - start], 16) {
+                let s = c.get(1).or(c.get(2)).unwrap().as_str();
+                match u32::from_str_radix(s, 16) {
                     Ok(cp) => match char::from_u32(cp) {
                         Some(c) => format!("{}", c),
                         None => String::new(),
@@ -701,27 +945,48 @@ fn command_text(m: &ArgMatches) {
             .to_string()
     };
     let to_uni_seq = |s: &str| {
-        to_uni_re
-            .replace_all(s, |cap: &Captures<'_>| match cap[1].chars().next() {
-                Some(c) => format!("\\u{:04x}", c as u32),
-                None => String::new(),
-            })
-            .to_string()
+        let mut res = String::new();
+        for c in s.chars() {
+            res.push_str(&format!("\\u{:04x}", c as u32));
+        }
+        res
+    };
+
+    let text = if m.get_flag("from-unicode") {
+        &from_uni_seq(raw_text)
+    } else {
+        raw_text
+    };
+
+    let nor_text = if m.contains_id("normalization") {
+        let typ = &get_command_str(m, "normalization");
+        if typ == "nfd" {
+            text.nfc().collect::<String>()
+        } else if typ == "nfkd" {
+            text.nfkd().collect::<String>()
+        } else if typ == "nfc" {
+            text.nfc().collect::<String>()
+        } else if typ == "nfkc" {
+            text.nfkc().collect::<String>()
+        } else if typ == "cjk" {
+            text.cjk_compat_variants().collect::<String>()
+        } else if typ == "safe" {
+            text.stream_safe().collect::<String>()
+        } else {
+            text.to_string()
+        }
+    } else {
+        text.to_owned()
     };
 
     let mut ioout = io::stdout().lock();
-    writeln!(ioout, "Text: '{}'", text).expect("Cannot write to stream");
     let mut last_idx = 0;
-    if m.get_flag("from-unicode") {
-        writeln!(ioout, "{}", &from_uni_seq(text)).expect("Cannot write to stream");
-    } else if m.get_flag("to-unicode") {
-        writeln!(ioout, "{}", &to_uni_seq(text)).expect("Cannot write to stream");
-    } else if m.get_flag("linebreak") {
+    if m.get_flag("linebreak") {
         for (idx, op) in linebreaks(text) {
             if idx == last_idx {
                 continue;
             }
-            writeln!(ioout, "{}, {:?}", printer(&text[last_idx..idx]), op)
+            writeln!(ioout, "{}, {:?}", printer(&text[last_idx .. idx]), op)
                 .expect("Cannot write to stream");
             last_idx = idx;
         }
@@ -737,8 +1002,8 @@ fn command_text(m: &ArgMatches) {
         for s in text.unicode_sentences() {
             writeln!(ioout, "{}", printer(s)).expect("Cannot write to stream");
         }
-    } else {
-        for c in text.chars() {
+    } else if m.get_flag("information") {
+        for c in nor_text.chars() {
             let name = &match uni_name(c) {
                 Some(n) => n.to_string(),
                 None => "<NA>".to_string(),
@@ -749,15 +1014,25 @@ fn command_text(m: &ArgMatches) {
             };
             writeln!(
                 ioout,
-                "{}, U+{:04X}, Script: '{:?}', Block: '{}', Name: '{}'",
+                "{}, U+{:04X}, S: '{:?}', G: '{:?} ({:?})', B: '{}', N: '{}'",
                 c,
                 c as u32,
                 c.script(),
+                c.general_category_group(),
+                c.general_category(),
                 block,
                 name
             )
             .expect("Cannot write to stream");
         }
+    } else if m.get_flag("from-unicode") {
+        writeln!(ioout, "{}", &from_uni_seq(raw_text))
+            .expect("Cannot write to stream");
+    } else if m.get_flag("to-unicode") {
+        writeln!(ioout, "{}", &to_uni_seq(raw_text))
+            .expect("Cannot write to stream");
+    } else {
+        writeln!(ioout, "{}", &nor_text).expect("Cannot write to stream");
     }
 }
 
@@ -765,7 +1040,11 @@ fn get_command_str<'a, 'b>(m: &'a ArgMatches, id: &'b str) -> String {
     normalize_quote(m.get_one::<String>(id).unwrap()).to_owned()
 }
 
-fn get_command_str_except<'a, 'b>(m: &'a ArgMatches, id: &'b str, except: &'b str) -> String {
+fn get_command_str_except<'a, 'b>(
+    m: &'a ArgMatches,
+    id: &'b str,
+    except: &'b str,
+) -> String {
     normalize_quote(m.get_one::<String>(id).expect(except)).to_owned()
 }
 
@@ -777,8 +1056,17 @@ fn round_n(num: f64, prec: i32) -> f64 {
 fn normalize_quote(s: &str) -> &str {
     if s.len() >= 2 {
         let idx_offset = (s.starts_with('\'') && s.ends_with('\'')) as usize;
-        &s[idx_offset..s.len() - idx_offset]
+        &s[idx_offset .. s.len() - idx_offset]
     } else {
         s
+    }
+}
+
+fn base64_decode(s: &str) -> Result<String, ErrorKind> {
+    use base64::prelude::*;
+    if let Ok(decode_bytes) = BASE64_STANDARD.decode(s) {
+        String::from_utf8(decode_bytes).map_err(|_| ErrorKind::InvalidInput)
+    } else {
+        Err(ErrorKind::InvalidInput)
     }
 }

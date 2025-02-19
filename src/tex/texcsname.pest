@@ -6,7 +6,7 @@ underscore = { "_" }
 at = { "@" }
 
 csname_l3_func_pub = @{
-    letter_any+ ~ underscore* ~ !(underscore) ~ (underscore | letter_any)* ~ collon ~ (collon | underscore | letter_any)*
+    letter_any+ ~ underscore* ~ (underscore | letter_any)* ~ collon ~ (collon | underscore | letter_any)*
 }
 csname_l3_func_internal = @{
     underscore{2} ~ (underscore | letter_any)* ~ collon ~ (collon | underscore | letter_any)*
@@ -32,23 +32,23 @@ cs_code = {
     (SOI ~ csname_l3_var_pub ~ EOI)
 }
 
-csname_carmal_case_small = @{ ASCII_ALPHA | letter_normal ~ csname_pascal* }
 csname_pascal = @{ carmal_case }
-cs_document = { 
+csname_carmal_case_small = @{ letter_normal ~ csname_pascal+ | ASCII_ALPHA }
+cs_document = {
     (SOI ~ csname_carmal_case_small ~ EOI) |
     (SOI ~ csname_pascal ~ EOI)
 }
 
-csname_punct = { 
+csname_punct = {
     "!" | "@" | "#" | "$" | "%" | "^" | "&" | 
-    "*" | "-" | "+" | "=" |
+    "*" | "-" | "_" | "+" | "=" |
     "(" | ")" | "{" | "}" | "[" | "]" | "<" | ">" |
     ":" | ";" | "\"" | "'" | "|" | "\\" | 
     "," | "." | "?" | "/"
 }
 cs_punct = { SOI ~ csname_punct ~ EOI }
 
-csname_l2e_internal = @{ 
+csname_l2e_internal = @{
     at ~ (at | letter_any)+ | letter_any+ ~ at ~ (at | letter_any)*
 }
 cs_internal = {
@@ -57,7 +57,7 @@ cs_internal = {
     (SOI ~ csname_l3_var_internal ~ EOI)
 }
 
-csname_l2e_kernel = @{ at ~ "kernel" ~ csname_l2e_internal }
+csname_l2e_kernel = @{ at ~ "kernel" ~ at ~ (at | letter_any)+ }
 cs_kernel = {
     (SOI ~ csname_l2e_kernel ~ EOI) |
     (SOI ~ csname_l3_primitive ~ EOI) |

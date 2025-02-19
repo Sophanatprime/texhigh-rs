@@ -1,6 +1,6 @@
 [package]
 name = "texhigh"
-version = "0.1.4"
+version = "0.2.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -8,6 +8,7 @@ edition = "2021"
 [dependencies]
 anstyle = "*"
 anyhow = "1"
+base64 = "*"
 bitflags = "2"
 byte-unit = "*"
 clap = "~4"
@@ -17,29 +18,33 @@ config = "~0"
 cosmic-text = "*"
 dirs = "*"
 encoding_rs = "*"
+enum_dispatch = "*"
 env_logger = "0"
 hashers = "*"
 indexmap = { version = "2", features = ["serde", "rayon"] }
 itoa = "*"
 lazy_static = "1"
 log = "0"
+memchr = "*"
 mimalloc = "*"
 pest = "~2"
 pest_derive = "2"
 rapidfuzz = "*"
 rayon = "*"
 regex = "1"
+regex-syntax = "*"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_with = "3"
 skrifa = "*"
-smallvec = { version = "1", features = ["serde", "write", "union"] }
+smallvec = { version = "1", features = ["serde", "write", "union", "const_generics"] }
 sys-locale = "*"
 textwrap = { version = "*", features = ["terminal_size"] }
 tiny-skia = "*"
 toml = "^0.8"
 unicode-linebreak = "*"
-unicode-properties = "*"
+unicode-normalization = "*"
+unicode-properties = { version = "*", features = ["general-category", "emoji"] }
 unicode-script = "*"
 unicode-segmentation = "*"
 unicode_names2 = "*"

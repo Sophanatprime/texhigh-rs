@@ -1,37 +1,46 @@
-#![feature(
-    step_trait,
-    iter_advance_by,
-    round_char_boundary,
-    debug_closure_helpers
-)]
+#![feature(step_trait, iter_advance_by, debug_closure_helpers)]
 // #![allow(unused)]
 
 use clap::{arg, value_parser, Arg, ArgAction, ArgMatches, Command};
 use env_logger;
-use std::{env::set_var as set_env_var, env::var as get_env_var, ffi::OsString};
+use std::{
+    env::set_var as set_env_var, env::var as get_env_var, ffi::OsString,
+};
 
 mod language;
 pub mod unicode;
-pub use language::{is_same_primary_language, language, language_str, Language, PrimaryLanguage};
+pub use language::{
+    is_same_primary_language, language, language_str, Language,
+    PrimaryLanguage,
+};
 mod kpathsea;
 mod tex;
 pub use kpathsea::KpseWhich;
+pub use tex::{get_cs_type, get_cs_type_re, primitive_engine, LaTeXType};
 pub mod config;
+pub mod fonts;
 pub mod high;
 pub mod layout;
 pub mod range;
-// mod regtex;
-pub mod fonts;
+pub mod regtex;
+pub mod tokenlist;
 pub mod types;
 
 const VERSION: i32 = 0;
-const REVERSION: &str = ".1.4";
-const DATE: &str = "2025/01/01";
+const REVERSION: &str = ".2.0";
+const DATE: &str = "2025/02/20";
 const COPYRIGHT: &str = "2024-2025, Wenjian Chern ©";
 
 pub fn get_matches() -> ArgMatches {
     let high = Command::new("high")
         .about("Highlight TeX texts and files")
+        .arg(
+            Arg::new("enhanced")
+                .long("enhanced")
+                .short('e')
+                .action(ArgAction::SetTrue)
+                .help("Use enhanced mode"),
+        )
         .arg(
             Arg::new("current-ctab")
                 .long("current-ctab")
@@ -43,8 +52,8 @@ pub fn get_matches() -> ArgMatches {
             Arg::new("ctab-set")
                 .long("ctab-set")
                 .alias("cs")
-                .help("Parse catcode table set from texts")
-                .action(ArgAction::Append),
+                .action(ArgAction::Append)
+                .help("Parse catcode table set from texts"),
         )
         .arg(
             Arg::new("ctab")
@@ -54,6 +63,15 @@ pub fn get_matches() -> ArgMatches {
                 .num_args(2)
                 .action(ArgAction::Append)
                 .help("Parse catcode table from texts"),
+        )
+        .arg(
+            Arg::new("ctab-base64")
+                .long("ctab-base64")
+                .alias("CB")
+                .value_names(["name", "ctab"])
+                .num_args(2)
+                .action(ArgAction::Append)
+                .help("Parse catcode table from texts whose second value is encoded with base 64"),
         )
         .arg(
             Arg::new("ctab-file")
@@ -72,12 +90,20 @@ pub fn get_matches() -> ArgMatches {
                 .help("Parse config from texts"),
         )
         .arg(
+            Arg::new("config-base64")
+                .long("config-base64")
+                .alias("cb")
+                .value_names(["key", "value"])
+                .num_args(2)
+                .action(ArgAction::Append)
+                .help("Parse config from texts whose second value is encoded with base 64"),
+        )
+        .arg(
             Arg::new("config-file")
                 .long("config-file")
                 .alias("cf")
                 .help("Parse config from files")
-                .action(ArgAction::Append)
-                .conflicts_with("config"),
+                .action(ArgAction::Append),
         )
         .arg(
             Arg::new("kpse-config-file")
@@ -94,10 +120,17 @@ pub fn get_matches() -> ArgMatches {
                 .help("Text to be highlight"),
         )
         .arg(
+            Arg::new("text-base64")
+                .long("text-base64")
+                .alias("tb")
+                .value_name("TEXT")
+                .help("Base 64 encoded text to be highlight"),
+        )
+        .arg(
             Arg::new("file")
                 .long("file")
                 .short('f')
-                .num_args(1..)
+                .num_args(1 ..)
                 .value_name("FILE")
                 .help("Files to be highlight")
                 .conflicts_with("text"),
@@ -106,12 +139,12 @@ pub fn get_matches() -> ArgMatches {
             Arg::new("output")
                 .long("output")
                 .short('o')
-                .help("File to be output"),
+                .help("File or directory to be output"),
         )
         .arg(
             Arg::new("kpse-args")
                 .last(true)
-                .num_args(0..)
+                .num_args(0 ..)
                 .help("Arguments for kpsewhich"),
         );
 
@@ -127,7 +160,7 @@ pub fn get_matches() -> ArgMatches {
                 )
                 .arg(
                     Arg::new("paths")
-                        .num_args(0..)
+                        .num_args(0 ..)
                         .help("Set paths of fonts to be added"),
                 ),
         )
@@ -175,7 +208,7 @@ pub fn get_matches() -> ArgMatches {
                     Arg::new("fuzzy")
                         .long("fuzzy")
                         .short('F')
-                        .num_args(0..=1)
+                        .num_args(0 ..= 1)
                         .default_missing_value("0.7")
                         .value_parser(value_parser!(f64))
                         .help("Use fuzzy matching, range [0.0, 1.0]"),
@@ -245,16 +278,10 @@ pub fn get_matches() -> ArgMatches {
                 .value_parser(value_parser!(f32))
                 .help("Maximum width of text, in bp, range (0.0, +inf)"),
         )
+        .arg(Arg::new("base64").long("base64").action(ArgAction::SetTrue).help("Is text encoded with Base 64 or not"))
         .arg(Arg::new("text").required(true));
     let text = Command::new("text")
         .about("Display text information, i.e. names or boundries")
-        .arg(
-            Arg::new("escaped")
-                .long("escaped")
-                .short('e')
-                .action(ArgAction::SetTrue)
-                .help("Display result by using escaped sequences"),
-        )
         .arg(
             Arg::new("cluster")
                 .long("cluster")
@@ -263,7 +290,7 @@ pub fn get_matches() -> ArgMatches {
                 .short_alias('g')
                 .action(ArgAction::SetTrue)
                 .help("Display text by extended grapheme clusters boundry")
-                .conflicts_with_all(["word", "sentence", "linebreak"]),
+                .conflicts_with_all(["word", "sentence", "linebreak", "list"]),
         )
         .arg(
             Arg::new("word")
@@ -271,7 +298,7 @@ pub fn get_matches() -> ArgMatches {
                 .short('w')
                 .action(ArgAction::SetTrue)
                 .help("Display text by word boundry")
-                .conflicts_with_all(["sentence", "linebreak"]),
+                .conflicts_with_all(["sentence", "linebreak", "list"]),
         )
         .arg(
             Arg::new("sentence")
@@ -279,31 +306,56 @@ pub fn get_matches() -> ArgMatches {
                 .short('s')
                 .action(ArgAction::SetTrue)
                 .help("Display text by sentence")
-                .conflicts_with_all(["linebreak"]),
+                .conflicts_with_all(["linebreak", "list"]),
         )
         .arg(
             Arg::new("linebreak")
                 .long("linebreak")
                 .short('l')
                 .action(ArgAction::SetTrue)
-                .help("Display text by linebreak point"),
+                .help("Display text by linebreak point")
+                .conflicts_with_all(["list"]),
+        )
+        .arg(
+            Arg::new("information")
+                .long("information")
+                .alias("info")
+                .short('i')
+                .action(ArgAction::SetTrue)
+                .help("List the information of every characters"),
         )
         .arg(
             Arg::new("from-unicode")
                 .long("from-unicode")
+                .visible_alias("from-escaped")
                 .short('f')
                 .action(ArgAction::SetTrue)
-                .help("Print the text parsed from a unicode escaped sequences")
+                .help(
+                    "Print the text parsed from a unicode escaped sequences\n",
+                )
                 .conflicts_with("to-unicode"),
         )
         .arg(
             Arg::new("to-unicode")
                 .long("to-unicode")
+                .visible_alias("escaped")
                 .short('t')
+                .visible_short_alias('e')
                 .action(ArgAction::SetTrue)
-                .help("Print the unicode escaped sequences of the text"),
+                .help("Print the unicode escaped sequences of the text\n"),
         )
-        .arg(Arg::new("text").required(true));
+        .arg(
+            Arg::new("normalization")
+                .long("normalization")
+                .short('n')
+                .value_parser(["nfd", "nfkd", "nfc", "nfkc", "cjk", "safe"])
+                .help("Apply Unicode normalization to the text\n"),
+        )
+        .arg(
+            Arg::new("text")
+                .help("The text. If not present, then get from stdin.")
+                .num_args(0 ..= 1),
+        );
 
     let matches = Command::new("texhigh")
         .about("TeX Helper in graphics and hypertext")
@@ -390,7 +442,7 @@ where
                 .long("texpath")
                 .alias("tex-path")
                 .default_missing_value("")
-                .num_args(0..=1)
+                .num_args(0 ..= 1)
                 .conflicts_with("texinputs"),
         )
         .get_matches_from(s);

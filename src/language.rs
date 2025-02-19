@@ -1729,7 +1729,7 @@ impl Language {
     pub fn to_str_primary(&self) -> &'static str {
         let lang = self.to_str();
         match lang.find('-') {
-            Some(idx) => &lang[0..idx],
+            Some(idx) => &lang[0 .. idx],
             None => lang,
         }
     }
@@ -2018,7 +2018,7 @@ impl PrimaryLanguage {
     pub fn to_str_primary(&self) -> &'static str {
         let lang = self.to_str();
         match lang.find('-') {
-            Some(idx) => &lang[0..idx],
+            Some(idx) => &lang[0 .. idx],
             None => lang,
         }
     }
@@ -2033,7 +2033,7 @@ mod tests {
     fn lang_basic() {
         let max = Language::___END as u16;
         assert_eq!(max as usize, LANGUAGE_PRIMARY.len());
-        for i in 0..max {
+        for i in 0 .. max {
             let lang = unsafe { transmute::<u16, Language>(i) };
             let be_prim = lang.primary();
             print!("{:?}, {:?}. ", lang, be_prim);
@@ -2043,7 +2043,10 @@ mod tests {
                 let l_p = lang.to_str_primary();
                 let b_p = be_prim.to_str_primary();
                 println!("{}, {}", lang.to_str(), be_prim.to_str());
-                assert!(is_same_primary_language(lang.to_str(), be_prim.to_str()));
+                assert!(is_same_primary_language(
+                    lang.to_str(),
+                    be_prim.to_str()
+                ));
                 assert!(is_same_primary_language(l_p, b_p));
             }
         }

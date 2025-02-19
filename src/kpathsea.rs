@@ -161,7 +161,10 @@ impl Drop for KpseWhich {
 }
 
 #[cfg(target_os = "windows")]
-pub(crate) fn get_decoder(_: &Vec<u8>, prefer: &str) -> io::Result<&'static Encoding> {
+pub(crate) fn get_decoder(
+    _: &Vec<u8>,
+    prefer: &str,
+) -> io::Result<&'static Encoding> {
     let codepage = if prefer.is_empty() {
         use winapi::um::winnls::GetACP;
         let s = unsafe { GetACP() };
@@ -178,11 +181,15 @@ pub(crate) fn get_decoder(_: &Vec<u8>, prefer: &str) -> io::Result<&'static Enco
     }
 }
 #[cfg(not(target_os = "windows"))]
-pub(crate) fn get_decoder(_: &Vec<u8>, prefer: &str) -> io::Result<&'static Encoding> {
+pub(crate) fn get_decoder(
+    _: &Vec<u8>,
+    prefer: &str,
+) -> io::Result<&'static Encoding> {
     if prefer.is_empty() {
         use encoding_rs::UTF_8;
         Ok(UTF_8)
     } else {
-        Encoding::for_label(prefer.as_bytes()).ok_or(io::ErrorKind::Other.into())
+        Encoding::for_label(prefer.as_bytes())
+            .ok_or(io::ErrorKind::Other.into())
     }
 }

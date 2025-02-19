@@ -1,7 +1,9 @@
 #![allow(unused)]
 
 use bitflags::bitflags;
+use lazy_static::lazy_static;
 use pest::{iterators::Pairs, Parser};
+use regex::RegexSet;
 
 #[derive(pest_derive::Parser)]
 #[grammar = "tex/texcsname.pest"]
@@ -51,6 +53,45 @@ bitflags! {
     }
 }
 
+lazy_static! {
+    static ref CS_TYPE_REGEX: RegexSet = RegexSet::new(&[
+        r"^@kernel@[@a-zA-Z]+$", // latex2e kernel
+        r"^tex_[_a-zA-Z]+:D$", // latex3 primitive
+        r"^__kernel_[_a-zA-Z]*:[:_a-zA-Z]*$", // latex3 func kernel
+        r"^[lgcsq]__kernel_[_a-zA-Z]+$", // latex3 var kernel
+        r"^@[@a-zA-Z]+|[a-zA-Z]+@[@a-zA-Z]*$", // latex2e internal
+        r"^__[_a-zA-Z]*:[:_a-zA-Z]*$", // latex3 func internal
+        r"^[lgcsq]__[_a-zA-Z]+$", // latex3 var internal
+        r"^[a-zA-Z]+_*[_a-zA-Z]*:[:_a-zA-Z]*$", // latex3 func pub
+        r"^[lgcsq]_[a-zA-Z][_a-zA-Z]*$", // latex3 var pub
+        r"^[a-zA-Z]$|^[a-z]+([A-Z][a-zA-Z]*)+$", // carmal case small
+        r"^[A-Z][a-zA-Z]*$", // pascal
+        r#"^[!@#$%^\&*\-_+=(){}\[\]<>:;"'|\\,.?/]$"#, // punct
+    ]).unwrap();
+}
+
+pub fn get_cs_type_re(input: &str) -> LaTeXType {
+    if let Some(idx) = CS_TYPE_REGEX.matches(input).into_iter().next() {
+        match idx {
+            0 => LaTeXType::L2eKernel,
+            1 => LaTeXType::L3Primitive,
+            2 => LaTeXType::L3FunctionKernel,
+            3 => LaTeXType::L3VariableKernel,
+            4 => LaTeXType::L2eInternal,
+            5 => LaTeXType::L3FunctionInternal,
+            6 => LaTeXType::L3VariableInternal,
+            7 => LaTeXType::L3FunctionPublic,
+            8 => LaTeXType::L3VariablePublic,
+            9 => LaTeXType::DocumentSmallCarmel,
+            10 => LaTeXType::DocumentPascal,
+            11 => LaTeXType::Punctuation,
+            _ => LaTeXType::Other,
+        }
+    } else {
+        LaTeXType::Other
+    }
+}
+
 pub fn get_cs_type(input: &str) -> LaTeXType {
     match LaTeXParser::parse(Rule::cs, input) {
         Ok(pairs) => {
@@ -70,7 +111,9 @@ pub fn get_cs_type(input: &str) -> LaTeXType {
                 Rule::csname_l3_var_internal => LaTeXType::L3VariableInternal,
                 Rule::csname_l3_var_pub => LaTeXType::L3VariablePublic,
                 Rule::csname_l3_var_kernel => LaTeXType::L3VariableKernel,
-                Rule::csname_carmal_case_small => LaTeXType::DocumentSmallCarmel,
+                Rule::csname_carmal_case_small => {
+                    LaTeXType::DocumentSmallCarmel
+                }
                 Rule::csname_pascal => LaTeXType::DocumentPascal,
                 Rule::csname_l2e_internal => LaTeXType::L2eInternal,
                 Rule::csname_l2e_kernel => LaTeXType::L2eKernel,
@@ -112,7 +155,7 @@ fn get_pairs_latex_rules<'a>(mut pairs: Pairs<'a, Rule>) -> Vec<Rule> {
 }
 
 pub fn cs_is_type(cs: &str, t: LaTeXType) -> bool {
-    t.contains(get_cs_type(cs))
+    t.contains(get_cs_type_re(cs))
 }
 
 include!("primitives_data.rs");
@@ -204,6 +247,123 @@ pub fn primitive_engine(cs: &str) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cs_name_type() {
+        use super::LaTeXType as L;
+
+        assert_eq!(get_cs_type_re(r"a"), L::DocumentSmallCarmel);
+        assert_eq!(get_cs_type_re(r"A"), L::DocumentSmallCarmel);
+        assert_eq!(get_cs_type_re(r"LaTeX"), L::DocumentPascal);
+        assert_eq!(get_cs_type_re(r"relax"), L::Other);
+        assert_eq!(
+            get_cs_type_re(r"@expl@@@initialize@all@@"),
+            L::L2eInternal
+        );
+        assert_eq!(get_cs_type_re(r"@kernel@eqno"), L::L2eKernel);
+        assert_eq!(get_cs_type_re(r"@"), L::Punctuation);
+        assert_eq!(get_cs_type_re(r"\"), L::Punctuation);
+        assert_eq!(get_cs_type_re(r"_"), L::Punctuation);
+        assert_eq!(get_cs_type_re(r"DeclareRobustCommand"), L::DocumentPascal);
+        assert_eq!(get_cs_type_re(r"smallSkip"), L::DocumentSmallCarmel);
+        assert_eq!(get_cs_type_re(r"smallSkipSSkip"), L::DocumentSmallCarmel);
+        assert_eq!(get_cs_type_re(r"aBzWW"), L::DocumentSmallCarmel);
+        assert_eq!(get_cs_type_re(r"tex_relax:D"), L::L3Primitive);
+        assert_eq!(get_cs_type_re(r"tex_XeTeXinterclass:D"), L::L3Primitive);
+        assert_eq!(
+            get_cs_type_re(r"token_XeTeXinterclass:D"),
+            L::L3FunctionPublic
+        );
+        assert_eq!(get_cs_type_re(r"group_begin:"), L::L3FunctionPublic);
+        assert_eq!(
+            get_cs_type_re(r"__text_change_case_codepoint:nnnnn"),
+            L::L3FunctionInternal
+        );
+        assert_eq!(
+            get_cs_type_re(r"text_declare_lowercase_mapping:nn"),
+            L::L3FunctionPublic
+        );
+        assert_eq!(get_cs_type_re(r"c_space_token"), L::L3VariablePublic);
+        assert_eq!(get_cs_type_re(r"q_nil"), L::L3VariablePublic);
+        assert_eq!(get_cs_type_re(r"exp:w"), L::L3FunctionPublic);
+        assert_eq!(get_cs_type_re(r"__kernel_exp_not:w"), L::L3FunctionKernel);
+        assert_eq!(
+            get_cs_type_re(r"g__kernel_prg_map_int"),
+            L::L3VariableKernel
+        );
+        assert_eq!(
+            get_cs_type_re(r"l__str_internal_tl"),
+            L::L3VariableInternal
+        );
+        assert_eq!(
+            get_cs_type_re(r"l___str__internal_tl_"),
+            L::L3VariableInternal
+        );
+        assert_eq!(
+            get_cs_type_re(r"___str___internal_tl:"),
+            L::L3FunctionInternal
+        );
+        assert_eq!(
+            get_cs_type_re(r"str___internal_tl_:_"),
+            L::L3FunctionPublic
+        );
+
+        assert_eq!(get_cs_type_re(r"a"), L::DocumentSmallCarmel);
+        assert_eq!(get_cs_type_re(r"A"), L::DocumentSmallCarmel);
+        assert_eq!(get_cs_type_re(r"LaTeX"), L::DocumentPascal);
+        assert_eq!(get_cs_type_re(r"relax"), L::Other);
+        assert_eq!(
+            get_cs_type_re(r"@expl@@@initialize@all@@"),
+            L::L2eInternal
+        );
+        assert_eq!(get_cs_type_re(r"@kernel@eqno"), L::L2eKernel);
+        assert_eq!(get_cs_type_re(r"@"), L::Punctuation);
+        assert_eq!(get_cs_type_re(r"\"), L::Punctuation);
+        assert_eq!(get_cs_type_re(r"_"), L::Punctuation);
+        assert_eq!(get_cs_type_re(r"DeclareRobustCommand"), L::DocumentPascal);
+        assert_eq!(get_cs_type_re(r"smallSkip"), L::DocumentSmallCarmel);
+        assert_eq!(get_cs_type_re(r"smallSkipSSkip"), L::DocumentSmallCarmel);
+        assert_eq!(get_cs_type_re(r"aBzWW"), L::DocumentSmallCarmel);
+        assert_eq!(get_cs_type_re(r"tex_relax:D"), L::L3Primitive);
+        assert_eq!(get_cs_type_re(r"tex_XeTeXinterclass:D"), L::L3Primitive);
+        assert_eq!(
+            get_cs_type_re(r"token_XeTeXinterclass:D"),
+            L::L3FunctionPublic
+        );
+        assert_eq!(get_cs_type_re(r"group_begin:"), L::L3FunctionPublic);
+        assert_eq!(
+            get_cs_type_re(r"__text_change_case_codepoint:nnnnn"),
+            L::L3FunctionInternal
+        );
+        assert_eq!(
+            get_cs_type_re(r"text_declare_lowercase_mapping:nn"),
+            L::L3FunctionPublic
+        );
+        assert_eq!(get_cs_type_re(r"c_space_token"), L::L3VariablePublic);
+        assert_eq!(get_cs_type_re(r"q_nil"), L::L3VariablePublic);
+        assert_eq!(get_cs_type_re(r"exp:w"), L::L3FunctionPublic);
+        assert_eq!(get_cs_type_re(r"__kernel_exp_not:w"), L::L3FunctionKernel);
+        assert_eq!(
+            get_cs_type_re(r"g__kernel_prg_map_int"),
+            L::L3VariableKernel
+        );
+        assert_eq!(
+            get_cs_type_re(r"l__str_internal_tl"),
+            L::L3VariableInternal
+        );
+        assert_eq!(
+            get_cs_type_re(r"l___str__internal_tl_"),
+            L::L3VariableInternal
+        );
+        assert_eq!(
+            get_cs_type_re(r"___str___internal_tl:"),
+            L::L3FunctionInternal
+        );
+        assert_eq!(
+            get_cs_type_re(r"str___internal_tl_:_"),
+            L::L3FunctionPublic
+        );
+    }
 
     #[test]
     fn tex_primitive() {

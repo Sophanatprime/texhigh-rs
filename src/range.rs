@@ -7,7 +7,7 @@ use compact_str::{format_compact, CompactString};
 
 use crate::types::ErrorKind;
 
-trait MinMaxValue {
+pub(crate) trait MinMaxValue: Copy + Ord + Step + Eq {
     const MIN: Self;
     const MAX: Self;
 }
@@ -41,7 +41,10 @@ impl Debug for NumberSpan<char> {
 
 impl<T: Debug + Copy + Ord + Step + Eq> NumberSpan<T> {
     pub fn cover(&self, rhs: &Self) -> Self {
-        NumberSpan(*self.0.start().min(rhs.0.start())..=*self.0.end().max(rhs.0.end()))
+        NumberSpan(
+            *self.0.start().min(rhs.0.start())
+                ..= *self.0.end().max(rhs.0.end()),
+        )
     }
     pub fn contains(&self, item: &T) -> bool {
         self.0.contains(item)
@@ -73,11 +76,13 @@ impl<T: Debug + Copy + Ord + Step + Eq> IntoIterator for NumberSpan<T> {
 
 impl<T: Debug + Copy + Ord + Step + Eq> From<T> for NumberSpan<T> {
     fn from(value: T) -> Self {
-        NumberSpan(value..=value)
+        NumberSpan(value ..= value)
     }
 }
 
-impl<T: Debug + Copy + Ord + Step + Eq> From<RangeInclusive<T>> for NumberSpan<T> {
+impl<T: Debug + Copy + Ord + Step + Eq> From<RangeInclusive<T>>
+    for NumberSpan<T>
+{
     fn from(value: RangeInclusive<T>) -> Self {
         assert!(value.start() <= value.end());
         NumberSpan(value)
@@ -96,14 +101,16 @@ where
     Full(ops::RangeFull),
 }
 
-impl<T: MinMaxValue + Debug + Copy + Ord + Step + Eq> From<RangeItem<T>> for NumberSpan<T> {
+impl<T: MinMaxValue + Debug> From<RangeItem<T>> for NumberSpan<T> {
     fn from(value: RangeItem<T>) -> Self {
         match value {
-            RangeItem::Single(v) => NumberSpan(v..=v),
-            RangeItem::From(v) => NumberSpan(v.start..=MinMaxValue::MAX),
-            RangeItem::Range(v) => NumberSpan(*v.start()..=*v.end()),
-            RangeItem::To(v) => NumberSpan(MinMaxValue::MIN..=v.end),
-            RangeItem::Full(_) => NumberSpan(MinMaxValue::MIN..=MinMaxValue::MAX),
+            RangeItem::Single(v) => NumberSpan(v ..= v),
+            RangeItem::From(v) => NumberSpan(v.start ..= MinMaxValue::MAX),
+            RangeItem::Range(v) => NumberSpan(*v.start() ..= *v.end()),
+            RangeItem::To(v) => NumberSpan(MinMaxValue::MIN ..= v.end),
+            RangeItem::Full(_) => {
+                NumberSpan(MinMaxValue::MIN ..= MinMaxValue::MAX)
+            }
         }
     }
 }
@@ -114,29 +121,33 @@ impl TryFrom<RangeItem<i64>> for NumberSpan<char> {
         let err = Err(ErrorKind::CharFromNumber);
         let res = match value {
             RangeItem::Single(v) => match try_get_char(v) {
-                Some(v) => NumberSpan(v..=v),
+                Some(v) => NumberSpan(v ..= v),
                 _ => return err,
             },
             RangeItem::From(v) => match try_get_char(v.start) {
-                Some(v) => NumberSpan(v..=char::MAX),
+                Some(v) => NumberSpan(v ..= char::MAX),
                 _ => return err,
             },
-            RangeItem::Range(v) => match (try_get_char(*v.start()), try_get_char(*v.end())) {
-                (Some(v1), Some(v2)) => NumberSpan(v1..=v2),
-                _ => return err,
-            },
+            RangeItem::Range(v) => {
+                match (try_get_char(*v.start()), try_get_char(*v.end())) {
+                    (Some(v1), Some(v2)) => NumberSpan(v1 ..= v2),
+                    _ => return err,
+                }
+            }
             RangeItem::To(v) => match try_get_char(v.end) {
-                Some(v) => NumberSpan(char::MIN..=v),
+                Some(v) => NumberSpan(char::MIN ..= v),
                 _ => return err,
             },
-            RangeItem::Full(_) => NumberSpan(char::MIN..=char::MAX),
+            RangeItem::Full(_) => NumberSpan(char::MIN ..= char::MAX),
         };
         Ok(res)
     }
 }
 
 pub(crate) fn is_valid_char(num: i64) -> bool {
-    !(num < char::MIN as i64 || num > char::MAX as i64 || (num > 0xD7FF && num < 0xE000))
+    !(num < char::MIN as i64
+        || num > char::MAX as i64
+        || (num > 0xD7FF && num < 0xE000))
 }
 
 pub(crate) fn try_get_char(num: i64) -> Option<char> {
@@ -189,7 +200,11 @@ pub fn parse_num(text: &str) -> Result<i64, ErrorKind> {
                 } else {
                     (
                         10,
-                        format_compact!("{}{}", c2, chars.collect::<CompactString>()),
+                        format_compact!(
+                            "{}{}",
+                            c2,
+                            chars.collect::<CompactString>()
+                        ),
                     )
                 }
             };
@@ -217,7 +232,12 @@ pub fn parse_num(text: &str) -> Result<i64, ErrorKind> {
         }
     } else {
         let signal = if signal % 2 == 1 { "-" } else { "" };
-        let num_str = format_compact!("{}{}{}", signal, c, chars.collect::<CompactString>());
+        let num_str = format_compact!(
+            "{}{}{}",
+            signal,
+            c,
+            chars.collect::<CompactString>()
+        );
         if let Ok(num) = i64::from_str_radix(&num_str, 10) {
             Ok(num)
         } else {
@@ -226,7 +246,10 @@ pub fn parse_num(text: &str) -> Result<i64, ErrorKind> {
     }
 }
 
-pub fn parse_num_range(text: &str, sep: &str) -> Result<RangeItem<i64>, ErrorKind> {
+pub fn parse_num_range(
+    text: &str,
+    sep: &str,
+) -> Result<RangeItem<i64>, ErrorKind> {
     let mut res = text.rsplitn(2, sep);
     let end = match res.next() {
         Some(end_str) if end_str.is_empty() => Err(ErrorKind::EmptyInput),
@@ -235,13 +258,15 @@ pub fn parse_num_range(text: &str, sep: &str) -> Result<RangeItem<i64>, ErrorKin
     };
     match end {
         Ok(end) => match res.next() {
-            Some(start_str) if start_str.is_empty() => Ok(RangeItem::To(..=end)),
+            Some(start_str) if start_str.is_empty() => {
+                Ok(RangeItem::To(..= end))
+            }
             Some(start_str) => match parse_num(start_str) {
                 Ok(start) => {
                     if start == end {
                         Ok(RangeItem::Single(start))
                     } else if start < end {
-                        Ok(RangeItem::Range(start..=end))
+                        Ok(RangeItem::Range(start ..= end))
                     } else {
                         Err(ErrorKind::InvalidInput)
                     }
@@ -252,9 +277,11 @@ pub fn parse_num_range(text: &str, sep: &str) -> Result<RangeItem<i64>, ErrorKin
         },
         Err(end) => match end {
             ErrorKind::EmptyInput => match res.next() {
-                Some(start_str) if start_str.is_empty() => Ok(RangeItem::Full(..)),
+                Some(start_str) if start_str.is_empty() => {
+                    Ok(RangeItem::Full(..))
+                }
                 Some(start_str) => match parse_num(start_str) {
-                    Ok(start) => Ok(RangeItem::From(start..)),
+                    Ok(start) => Ok(RangeItem::From(start ..)),
                     Err(_) => Err(ErrorKind::InvalidInput),
                 },
                 None => Err(ErrorKind::InvalidInput),
@@ -321,13 +348,16 @@ mod tests {
         assert_eq!(parse_num_range("`\\.", ".."), Ok(Single('.' as i64)));
         assert_eq!(
             parse_num_range("`\\...100", ".."),
-            Ok(Range('.' as i64..=100))
+            Ok(Range('.' as i64 ..= 100))
         );
-        assert_eq!(parse_num_range("0..10", ".."), Ok(Range(0..=10)));
-        assert_eq!(parse_num_range("..10", ".."), Ok(To(..=10)));
-        assert_eq!(parse_num_range("0..", ".."), Ok(From(0..)));
+        assert_eq!(parse_num_range("0..10", ".."), Ok(Range(0 ..= 10)));
+        assert_eq!(parse_num_range("..10", ".."), Ok(To(..= 10)));
+        assert_eq!(parse_num_range("0..", ".."), Ok(From(0 ..)));
         assert_eq!(parse_num_range("..", ".."), Ok(Full(..)));
-        assert_eq!(parse_num_range("10..0", ".."), Err(ErrorKind::InvalidInput));
+        assert_eq!(
+            parse_num_range("10..0", ".."),
+            Err(ErrorKind::InvalidInput)
+        );
         assert_eq!(
             parse_num_range("10..?0", ".."),
             Err(ErrorKind::InvalidInput)
