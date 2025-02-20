@@ -62,7 +62,7 @@ pub fn get_matches() -> ArgMatches {
                 .value_names(["name", "ctab"])
                 .num_args(2)
                 .action(ArgAction::Append)
-                .help("Parse a catcode table from the provided text. Requires two arguments: <name> and <ctab>."),
+                .help("Parse a catcode table from the provided text."),
         )
         .arg(
             Arg::new("ctab-base64")
@@ -71,7 +71,7 @@ pub fn get_matches() -> ArgMatches {
                 .value_names(["name", "ctab"])
                 .num_args(2)
                 .action(ArgAction::Append)
-                .help("Parse a catcode table from the provided text where the second value is base64 encoded. Requires two arguments: <name> and <ctab>."),
+                .help("Parse a catcode table from the provided text where the second value is base64 encoded."),
         )
         .arg(
             Arg::new("ctab-file")
@@ -87,7 +87,7 @@ pub fn get_matches() -> ArgMatches {
                 .value_names(["key", "value"])
                 .num_args(2)
                 .action(ArgAction::Append)
-                .help("Parse a configuration setting from the provided text. Requires two arguments: <key> and <value>."),
+                .help("Parse a configuration setting from the provided text."),
         )
         .arg(
             Arg::new("config-base64")
@@ -96,7 +96,7 @@ pub fn get_matches() -> ArgMatches {
                 .value_names(["key", "value"])
                 .num_args(2)
                 .action(ArgAction::Append)
-                .help("Parse a configuration setting from the provided text where the second value is base64 encoded. Requires two arguments: <key> and <value>."),
+                .help("Parse a configuration setting from the provided text where the second value is base64 encoded."),
         )
         .arg(
             Arg::new("config-file")
@@ -147,7 +147,7 @@ pub fn get_matches() -> ArgMatches {
                 .num_args(0 ..)
                 .help("Pass additional arguments to `kpsewhich`."),
         );
-        let font = Command::new("font")
+    let font = Command::new("font")
         .about("Utilities for managing and querying fonts")
         .subcommand(
             Command::new("build")
@@ -241,7 +241,7 @@ pub fn get_matches() -> ArgMatches {
                         .help("Specify the font name or path to search for."),
                 ),
         );
-        let layout = Command::new("layout")
+    let layout = Command::new("layout")
         .arg(
             Arg::new("output")
                 .long("output")
@@ -336,8 +336,7 @@ pub fn get_matches() -> ArgMatches {
                 .visible_alias("from-escaped")
                 .short('f')
                 .action(ArgAction::SetTrue)
-                .help("Parse and print text from Unicode escape sequences.")
-                .conflicts_with("to-unicode"),
+                .help("Parse and print text from Unicode escape sequences."),
         )
         .arg(
             Arg::new("to-unicode")

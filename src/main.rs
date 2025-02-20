@@ -70,7 +70,7 @@ fn command_high(m: &ArgMatches) {
     let ctab_name = &get_command_str(m, "current-ctab");
     let ctab = ctabset
         .get_by_name(ctab_name)
-        .expect("Unknown currant catcode table name.");
+        .expect("Unknown current catcode table name.");
     info!(target: "Highlight Config", "Current ctab: {}", ctab_name);
     let mut ctabs = CatCodeStack::new();
     match th_config.high_config.ctabs_fallback.get(ctab_name) {
@@ -562,7 +562,7 @@ where
     let timer = time::Instant::now();
     let db = if default {
         #[cfg(target_os = "windows")]
-        let sys_font_paths = vec!["C:\\windows\\fonts"];
+        let sys_font_paths = vec!["C:\\Windows\\Fonts"];
         #[cfg(target_os = "macos")]
         let sys_font_paths = vec!["/Library/Fonts", "/System/Library/Fonts"];
         #[cfg(not(any(target_os = "windows", target_os = "macos")))]
@@ -598,7 +598,7 @@ where
 
         let input_paths = paths.into_iter();
 
-        println!("Finding truetype fonts from: [");
+        println!("Finding opentype fonts from: [");
         tex_truetype_paths.iter().for_each(|p| println!("    {},", p));
         sys_font_paths.iter().for_each(|p| println!("    {},", p));
         input_paths.clone().for_each(|p| println!("    {},", p.display()));
@@ -623,7 +623,7 @@ where
     let status = match db.save_to_file(&filename, false) {
         Ok(_) => {
             println!(
-                "Found {} font face(s), {} indexed names, writing to '{}'",
+                "{} font faces are found, {} indexed names, writing to '{}'",
                 db.file_count(),
                 db.link_count(),
                 filename.display()
@@ -919,7 +919,11 @@ fn command_text(m: &ArgMatches) {
         Box::new(|s: &str| {
             let mut res = String::new();
             for c in s.chars() {
-                res.push_str(&format!("\\u{:04x}", c as u32));
+                if c as u32 > 0xFFFF {
+                    res.push_str(&format!("\\u{{{:04x}}}", c as u32));
+                } else {
+                    res.push_str(&format!("\\u{:04x}", c as u32));
+                }
             }
             res
         })
@@ -1026,8 +1030,16 @@ fn command_text(m: &ArgMatches) {
             .expect("Cannot write to stream");
         }
     } else if m.get_flag("from-unicode") {
-        writeln!(ioout, "{}", &from_uni_seq(raw_text))
-            .expect("Cannot write to stream");
+        writeln!(
+            ioout,
+            "{}",
+            &if m.get_flag("to-unicode") {
+                to_uni_seq(text)
+            } else {
+                from_uni_seq(raw_text)
+            }
+        )
+        .expect("Cannot write to stream");
     } else if m.get_flag("to-unicode") {
         writeln!(ioout, "{}", &to_uni_seq(raw_text))
             .expect("Cannot write to stream");

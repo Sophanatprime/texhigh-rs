@@ -3,8 +3,6 @@ name = "texhigh"
 version = "0.2.0"
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
 anstyle = "*"
 anyhow = "1"
@@ -12,7 +10,6 @@ base64 = "*"
 bitflags = "2"
 byte-unit = "*"
 clap = "~4"
-codepage = "*"
 compact_str = { version = "*", features = ["serde"] }
 config = "~0"
 cosmic-text = "*"
@@ -49,5 +46,11 @@ unicode-script = "*"
 unicode-segmentation = "*"
 unicode_names2 = "*"
 walkdir = "2"
-winapi = { version = "*", features = ["winnls"] }
 yeslogic-unicode-blocks = "*"
+
+[target.'cfg(windows)'.dependencies]
+codepage = "*"
+winapi = { version = "*", features = ["winnls"] }
+
+[profile.release]
+panic = "abort"

@@ -356,7 +356,8 @@ pub struct SourcedFormatter<'a> {
     tokenlist: Arc<SourcedTokenList>,
     group_level: Cell<isize>,
     index: Cell<usize>,
-    range: Cell<usize>,
+    #[allow(dead_code)]
+    range: Cell<usize>, //TODO: detect ranges, i.e. arguments of macros
 }
 impl<'a> SourcedFormatter<'a> {
     pub fn format_now<T: HWrite>(
@@ -380,7 +381,8 @@ impl<'a> SourcedFormatter<'a> {
                     None => break,
                 },
             };
-            let range_name = self.get_range_category(&self.tokenlist.as_ref());
+            let _range_name =
+                self.get_range_category(&self.tokenlist.as_ref());
 
             match token {
                 Token::Char(chr) if self.is_newline(chr) => {

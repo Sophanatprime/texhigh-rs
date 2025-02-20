@@ -1073,13 +1073,15 @@ impl FromStr for CTabSet {
     /// ```txt
     /// [ctabname]
     /// <char num range> = catcode
-    /// <char num range> = <char num>..<char num> | <char num>
+    /// <char num range> = <char num>..<char num> | <char num> | <block name>
     /// <char num> := `<char> | `\<char> | '0o'[0-7]+ | '0x'[0-F]+ | [0-9]+
+    /// <block name> := UNICODE BLOCK NAME
     /// 0b100 = 12
     /// 0x20 = 10
     /// 032 = 10
     /// `a = 11
     /// `\\ = 0
+    /// CJK_UNIFIED_IDEOGRAPHS = 11
     /// ```
     /// Comment: /* comment, can be /* nested */, will be converted to a space */
     fn from_str(s: &str) -> Result<Self, Self::Err> {
