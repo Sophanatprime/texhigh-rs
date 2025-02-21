@@ -462,6 +462,25 @@ impl HighFormat for StandardFormatter<'_> {
             CompactString::const_new("?")
         }
     }
+    fn fmt_punct<T: HWrite>(
+        &self,
+        stream: &mut T,
+        chr: &Character,
+    ) -> Result<(), ErrorKind> {
+        let mut s = [0; 4];
+        self.fmt_raw(
+            stream,
+            format_args!(
+                "\\THpn{{{}}}{{{}}}",
+                self.get_punct_category(chr).unwrap().as_str(),
+                if self.high_config.char_replacements.contains(&chr.charcode) {
+                    self.get_char_replacement(chr.charcode)
+                } else {
+                    escape_string(chr.charcode.encode_utf8(&mut s), b'^')
+                },
+            ),
+        )
+    }
     fn fmt_chr<T: HWrite>(
         &self,
         stream: &mut T,
@@ -661,7 +680,21 @@ impl<'b> StandardFormatter<'b> {
         if self.get_punct_category(chr).is_some() {
             self.fmt_punct(stream, chr)?;
         } else {
-            self.fmt_raw(stream, format_args!("{}", chr.charcode))?;
+            self.fmt_raw(
+                stream,
+                format_args!(
+                    "{}",
+                    if self
+                        .high_config
+                        .char_replacements
+                        .contains(&chr.charcode)
+                    {
+                        self.get_char_replacement(chr.charcode)
+                    } else {
+                        chr.charcode.to_compact_string()
+                    }
+                ),
+            )?;
         }
         while let Some(token) = tokens.next() {
             match token {
@@ -674,7 +707,21 @@ impl<'b> StandardFormatter<'b> {
                     if self.get_punct_category(c).is_some() {
                         self.fmt_punct(stream, c)?;
                     } else {
-                        self.fmt_raw(stream, format_args!("{}", c.charcode))?;
+                        self.fmt_raw(
+                            stream,
+                            format_args!(
+                                "{}",
+                                if self
+                                    .high_config
+                                    .char_replacements
+                                    .contains(&c.charcode)
+                                {
+                                    self.get_char_replacement(c.charcode)
+                                } else {
+                                    c.charcode.to_compact_string()
+                                }
+                            ),
+                        )?;
                     }
                 }
                 _ => return Ok(Some(token)),
