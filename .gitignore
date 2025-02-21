@@ -4,3 +4,6 @@
 *.xlsx
 /latex test
 *.txt
+*.texhigh
+*.verb
+*.listing

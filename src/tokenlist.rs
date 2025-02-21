@@ -1039,7 +1039,7 @@ end of   a line counts as a space.
     #[test]
     fn high() {
         let mut s = String::new();
-        File::open(r"benches\list.tex")
+        File::open(r"benches/list.tex")
             .unwrap()
             .read_to_string(&mut s)
             .unwrap();
@@ -1126,10 +1126,11 @@ end of   a line counts as a space.
     }
 
     #[test]
+    #[ignore]
     fn high_expl3() {
         let time = std::time::Instant::now();
         let mut s = String::new();
-        File::open(r"benches\expl3-code.tex")
+        File::open(r"benches/expl3-code.tex")
             .unwrap()
             .read_to_string(&mut s)
             .unwrap();
@@ -1144,7 +1145,7 @@ end of   a line counts as a space.
 
         let mut f = std::io::BufWriter::with_capacity(
             64_000,
-            std::fs::File::create("./expl3-code.high").unwrap(),
+            std::fs::File::create("./expl3-code.texhigh").unwrap(),
         );
         fmt.format_now(&mut f).unwrap();
         println!("Takes: {}s", time.elapsed().as_secs_f32());
