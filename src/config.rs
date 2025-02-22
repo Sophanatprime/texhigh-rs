@@ -468,6 +468,9 @@ pub struct Category3 {
 }
 
 impl Category3 {
+    pub fn is_empty(&self) -> bool {
+        self.strings.is_empty() && self.regexset.is_empty() && self.regtexset.is_empty()
+    }
     pub fn contains<'a>(&self, s: impl Into<Input<'a>>) -> bool {
         match s.into() {
             Input::Char(c) => {

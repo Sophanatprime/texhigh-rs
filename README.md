@@ -79,9 +79,9 @@ The default Catcode Tables can be found in the [prelude-ctabset](src/prelude-cta
 
 All configurable items can be found in the [prelude-config](src/prelude-config.toml) file.
 
-#### String Regular Expressions
+#### Plain Text Regular Expressions
 
-String regular expressions are regular expressions for plain text. `texhigh` uses Rust's [`regex`](https://crates.io/crates/regex) crate. The full syntax can be found in [its documentation](https://docs.rs/regex/latest/regex/#syntax).
+Plain text regular expressions are regular expressions for plain text. `texhigh` uses Rust's [`regex`](https://crates.io/crates/regex) crate. The full syntax can be found in [its documentation](https://docs.rs/regex/latest/regex/#syntax).
 
 #### TeX Regular Expressions
 

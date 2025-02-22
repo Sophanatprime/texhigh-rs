@@ -77,15 +77,15 @@ CJK_UNIFIED_IDEOGRAPHS = 11 /* Unicode block name */
 
 全部可配置项见 [prelude-config](src/prelude-config.toml) 文件。
 
-### 字符串正则表达式
+### 纯文本正则表达式
 
-字符串正则表达式就是针对纯文本的正则表达式，`texhigh` 使用 Rust 的 [`regex`](https://crates.io/crates/regex) 库，完整的正则表达式语法见[其文档](https://docs.rs/regex/latest/regex/#syntax)。
+纯文本正则表达式就是针对纯文本的正则表达式，`texhigh` 使用 Rust 的 [`regex`](https://crates.io/crates/regex) 库，完整的正则表达式语法见[其文档](https://docs.rs/regex/latest/regex/#syntax)。
 
 ### TeX 正则表达式
 
 由于 TeX 并非以纯文本存储其内部符号，所以针对纯文本的正则表达式并不能正确匹配 TeX 的内部符号。`texhigh` 支持 TeX 正则表达式，使其能够匹配 TeX 内部符号，例如匹配控制序列（Control Sequence）、字符的类别码等等。
 
-`texhigh` 支持的 TeX 正则表达式总体上与字符串正则表达式相似，其语法与 LaTeX3 的 `l3regex` 模块近乎完全相同，除了暂不支持 `\b` `\B` `\G` `\u` 这几个转义序列，以及对 `\c` 转义序列取反（即暂不支持 `[^\c{begin}\c{end}]` 这种写法）。
+`texhigh` 支持的 TeX 正则表达式总体上与纯文本正则表达式相似，其语法与 LaTeX3 的 `l3regex` 模块近乎完全相同，除了暂不支持 `\b` `\B` `\G` `\u` 这几个转义序列，以及对 `\c` 转义序列取反（即暂不支持 `[^\c{begin}\c{end}]` 这种写法）。
 
 ## `font` 子命令
 

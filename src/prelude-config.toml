@@ -1,16 +1,29 @@
+# gobble the first n characters of each lines
 gobble = 0
+# can be break line before these characters
 break_at = [' ', "\t"]
+# break line indent
 break_indent = 2
+# whether replace tab to spaces
 replace_tab = true
+# counts of spaces when replace tab
 tabs_len = 2
+# lines of text to be highlight
 lines = [0, 0]
 do_not_break = []
+# array of lexer rules when parse TeX text
 lexer = []
+# characters which are needed to be replaced
 char_replacements = []
 
 [ranges]
 
+# category of characters
 [char_categories]
+# symbol = '<Regular Expression>'
+# symbol = ['<item>', ...]
+# where '<item>' is a character or '\I<Regular Expression>' or '\L<character>'
+# eg. symbol = ['$', '\I[\ \\#%&]', '\L|']
 
 [cs_categories]
 'latex.document' = [

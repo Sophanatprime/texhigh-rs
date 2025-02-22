@@ -199,6 +199,10 @@ impl RegTExSet {
         &self.patterns
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.regex_set.is_empty()
+    }
+
     pub fn is_match(&self, tokenlist: &TokenListBytes) -> bool {
         self.regex_set.is_match(tokenlist.as_bytes())
     }
