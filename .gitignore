@@ -5,7 +5,8 @@
 *.txt
 *.verb
 *.xlsx
+/.vscode
 /latex test
 /target
-tests/pattern.rs
 tests/pairs.rs
+tests/pattern.rs

@@ -397,7 +397,7 @@ fn get_thconfig(m: &ArgMatches) -> THConfig {
 fn get_highconfig(m: &ArgMatches) -> HighConfig {
     use config::{Config, File, FileFormat};
     let use_kpse = m.get_flag("kpse-config-file");
-    let kpse = if m.contains_id("kpse-args") {
+    let mut kpse = if m.contains_id("kpse-args") {
         let kpse_m = get_kpse_matches(
             m.get_many::<String>("kpse-args").unwrap().collect::<Vec<_>>(),
         );
@@ -405,6 +405,9 @@ fn get_highconfig(m: &ArgMatches) -> HighConfig {
     } else {
         KpseWhich::new()
     };
+    if let Ok(k) = std::env::var("KPSEWHICH_EXE_FILE") {
+        kpse.set_exe(&k);
+    }
     let mut config = Config::builder();
     config = config.add_source(File::from_str(
         include_str!("prelude-config.toml"),
@@ -571,15 +574,16 @@ where
 
         // TODO: Need to use kpathsea/cpathsea to get truetype and opentype directories,
         // and remove the use of normalize_kpse_paths
-        let kpse_path = current_exe().and_then(|mut p| {
+        let kpse_exe_file = std::env::var("KPSEWHICH_EXE_FILE");
+        let kpse_tds_path = current_exe().and_then(|mut p| {
             p.set_file_name("kpsewhich");
             p.set_extension(std::env::consts::EXE_EXTENSION);
             Ok(p)
         });
-        let is_in_tex_bin_dir = kpse_path.map_or(false, |p| p.exists());
-        let tex_truetype_paths = if is_in_tex_bin_dir {
-            let kpse_exe = std::env::var("KPSEWHICH_EXE_FILE")
-                .unwrap_or(String::from("kpsewhich"));
+        let tex_truetype_paths = if kpse_exe_file.is_ok()
+            || kpse_tds_path.map_or(false, |p| p.exists())
+        {
+            let kpse_exe = kpse_exe_file.unwrap_or(String::from("kpsewhich"));
             let mut res = vec![];
             if let Some(texmf_dist_dir) =
                 KpseWhich::var_value_with_exe("TEXMFDIST", &kpse_exe, false)

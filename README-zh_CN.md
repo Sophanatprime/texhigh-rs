@@ -54,6 +54,17 @@ texhigh high [选项] [-- [kpse-args]...]
 - `-o <OUTPUT>` `--output <OUTPUT>`，设置输出的文件名或目录，若未设置，则输出到标准输出流。
 - `-h` `--help`，打印帮助文本。
 
+`kpse-args` 可用的选项，这些选项和 kpathsea 文档中描述的功能相一致：
+- `--all`，列出所有匹配的文件。
+- `--must-exist`，尽可能地找到所需的文件，这可能会访问磁盘或执行 `mktex` 等脚本。默认情况下只在 `ls-R` 数据库中查找。
+- `--path <paths> `，在指定的路径中查找。会执行路径展开。
+- `--subdir <dir>`，只给出搜索结果中目录以 `<dir>` 结尾的文件。这暗含 `--all`。
+- `--texinputs <paths>`，修改 `TEXINPUTS` 环境变量，`kpsewhich` 会在此环境变量指定的路径中查找文件。
+- `--texpath <paths>`，相当于设置 `--texinputs '<paths>;'`，即除了在默认的目录中查找外，还在 `<paths>` 中查找。
+- `--encoding <encoding>`，设置编码。一般无需另行设置。
+
+texhigh 会首先使用 `KPSEWHICH_EXE_FILE` 环境变量中指定的 `kpsewhich` 可执行文件，若未设置该环境变量，则直接调用 `kpsewhich`，不论其存在与否。
+
 ### 类别码表
 
 类别码表由表名以及字符-类别码对组成，表名由字符和数字组成，下例是一个有效的类别码表：
