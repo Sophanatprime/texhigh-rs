@@ -385,6 +385,7 @@ pub fn get_matches() -> ArgMatches {
                      1=error, 2=warn, 3=info, 4=debug, 5=trace, 6=off",
                 ),
         )
+        .allow_external_subcommands(true)
         .subcommand(high)
         .subcommand(font)
         .subcommand(layout)

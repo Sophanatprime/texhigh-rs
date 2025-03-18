@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 use std::env::current_exe;
+use std::ffi::OsString;
 use std::fs::{self, File};
 use std::io::{self, BufReader, BufWriter, Read};
 use std::iter::{empty, zip};
@@ -27,10 +28,10 @@ use texhigh::{
     KpseWhich,
 };
 use textwrap::termwidth;
+use unicode_properties::UnicodeGeneralCategory;
 
 #[cfg(not(debug_assertions))]
 use mimalloc::MiMalloc;
-use unicode_properties::UnicodeGeneralCategory;
 #[cfg(not(debug_assertions))]
 #[global_allocator]
 static GLOBAL: MiMalloc = MiMalloc;
@@ -42,8 +43,16 @@ fn main() {
         Some(("font", font)) => command_font(font),
         Some(("layout", layout)) => command_layout(layout),
         Some(("text", text)) => command_text(text),
-        _ => {}
+        Some((ext_subcmd, ext_m)) => external_subcommand(
+            ext_subcmd,
+            ext_m.get_many::<OsString>("").unwrap().collect(),
+        ),
+        None => {}
     }
+}
+
+fn external_subcommand(cmd: &str, _: Vec<&OsString>) {
+    eprintln!("Unknown subcommand '{}'", cmd)
 }
 
 enum Formatter<'s> {
@@ -377,6 +386,7 @@ fn get_thconfig(m: &ArgMatches) -> THConfig {
             Vec::with_capacity(ctab_set_indices.len());
         for ct in ctab_set_fn {
             info!(target: "Finding ctab-file", "{}", ct);
+            // do we need kpsewhich?
             let mut f =
                 BufReader::new(File::open(ct).expect("Unknown ctab-file"));
             let s = io::read_to_string(&mut f).expect("Unable read ctab-file");

@@ -46,6 +46,7 @@ unicode-script = "*"
 unicode-segmentation = "*"
 unicode_names2 = "*"
 walkdir = "2"
+which = "*"
 yeslogic-unicode-blocks = "*"
 
 [target.'cfg(windows)'.dependencies]

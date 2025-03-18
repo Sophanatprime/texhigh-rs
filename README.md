@@ -57,7 +57,7 @@ Options:
 `kpse-args` Options. The following options are available for `kpse-args`, consistent with the functionality described in the Kpathsea documentation:
 - `--all`: List all matching files.
 - `--must-exist`: Do everything possible to find the files, notably including searching the disk and running the `mktex` scripts. By default, only the `ls-R` database is checked, in the interest of efficiency.
-- `--path <paths>`: Search along the `paths` (colon-separated as usual), instead of guessing the search path from the filename. `//` and all the usual expansions are supported
+- `--path <paths>`: Search along the `paths` (colon-separated as usual), instead of guessing the search path from the filename. `//` and all the usual expansions are supported.
 - `--subdir <dir>`: Report only those matches whose directory part ends with `<dir>` (compared literally, except case is ignored on a case-insensitive operating system). This implies `--all`.
 - `--texinputs <paths>`: Modify the `TEXINPUTS` environment variable. `kpsewhich` will search in the paths specified by this variable.
 - `--texpath <paths>`: Equivalent to setting `--texinputs '<paths>;'`, i.e., search in both default paths and `<paths>`.
