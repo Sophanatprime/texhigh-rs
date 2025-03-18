@@ -1134,10 +1134,18 @@ impl<'s> RegTExBuilder<'s> {
             'a' | 'f' | 'n' | 'r' | 't' => {
                 self.parse_meta_char(asts, escape_type as u8)
             }
-            'A' => self.next_with(Ast::Assertion(Box::new(Assertion::StartText))),
-            'Z' => self.next_with(Ast::Assertion(Box::new(Assertion::EndText))), // \Z = \z
-            'z' => self.next_with(Ast::Assertion(Box::new(Assertion::EndText))),
-            'B' => self.next_with(Ast::Assertion(Box::new(Assertion::NotWordBoundary))),
+            'A' => {
+                self.next_with(Ast::Assertion(Box::new(Assertion::StartText)))
+            }
+            'Z' => {
+                self.next_with(Ast::Assertion(Box::new(Assertion::EndText)))
+            } // \Z = \z
+            'z' => {
+                self.next_with(Ast::Assertion(Box::new(Assertion::EndText)))
+            }
+            'B' => self.next_with(Ast::Assertion(Box::new(
+                Assertion::NotWordBoundary,
+            ))),
             'e' => self.parse_uni_chars(asts, &['\x1b'], false),
             'h' => self.parse_uni_chars(asts, &['\x09', '\x20'], false),
             'H' => self.parse_uni_chars(asts, &['\x09', '\x20'], true),

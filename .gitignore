@@ -1,9 +1,11 @@
-/target
+*.listing
 *.rs-bak
-*.lock
+*.tex
+*.texhigh
+*.txt
+*.verb
 *.xlsx
 /latex test
-*.txt
-*.texhigh
-*.verb
-*.listing
+/target
+tests/pattern.rs
+tests/pairs.rs

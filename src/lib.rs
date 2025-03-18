@@ -26,9 +26,8 @@ pub mod regtex;
 pub mod tokenlist;
 pub mod types;
 
-const VERSION: i32 = 0;
-const REVERSION: &str = ".2.0";
-const DATE: &str = "2025/02/20";
+const FULL_VERSION: &str = env!("CARGO_PKG_VERSION");
+const DATE: &str = "2025/03/18";
 const COPYRIGHT: &str = "2024-2025, Wenjian Chern ©";
 
 pub fn get_matches() -> ArgMatches {
@@ -362,6 +361,7 @@ pub fn get_matches() -> ArgMatches {
 
     let matches = Command::new("texhigh")
         .about("TeX Helper in graphics and hypertext")
+        .version(FULL_VERSION)
         .arg(
             Arg::new("no-banner")
                 .long("no-banner")
@@ -393,8 +393,8 @@ pub fn get_matches() -> ArgMatches {
 
     if !matches.get_flag("no-banner") {
         println!(
-            "This is TeXHigh, version {}{} ({}), copyright {}.",
-            VERSION, REVERSION, DATE, COPYRIGHT
+            "This is TeXHigh, version {} ({}), copyright {}.",
+            FULL_VERSION, DATE, COPYRIGHT
         );
     }
     match matches.get_one::<String>("logging-level") {

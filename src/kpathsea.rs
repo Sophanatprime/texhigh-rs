@@ -8,13 +8,14 @@ use std::process::Command;
 
 #[derive(Debug)]
 pub struct KpseWhich {
-    all: bool,
-    must_exist: bool,
+    pub exe_path: Option<String>,
+    pub all: bool,
+    pub must_exist: bool,
     path: String,
     subdir: String,
     tex_inputs: Option<String>,
     tex_inputs_bak: Option<String>,
-    encoding: String,
+    pub encoding: String,
 }
 
 impl KpseWhich {
@@ -24,6 +25,7 @@ impl KpseWhich {
             Err(_) => None,
         };
         KpseWhich {
+            exe_path: None,
             all: false,
             must_exist: false,
             path: String::new(),
@@ -34,7 +36,15 @@ impl KpseWhich {
         }
     }
     pub fn var_value(var: &str, expand_brace: bool) -> Option<String> {
-        let mut cmd = Command::new("kpsewhich");
+        KpseWhich::var_value_with_exe(var, "kpsewhich", expand_brace)
+    }
+    pub fn var_value_with_exe(
+        var: &str,
+        exe: impl AsRef<OsStr>,
+        expand_brace: bool,
+    ) -> Option<String> {
+        let mut cmd = Command::new(exe.as_ref());
+        info!(target: "KpseWhich command", "{}", exe.as_ref().to_str().unwrap_or_default());
         if expand_brace {
             cmd.arg("--var-brace-value");
         } else {
@@ -85,6 +95,7 @@ impl KpseWhich {
             None => "".to_string(),
         };
         KpseWhich {
+            exe_path: None,
             all,
             must_exist,
             path,
@@ -95,6 +106,10 @@ impl KpseWhich {
         }
     }
 
+    pub fn set_exe(&mut self, exe: &str) -> &mut Self {
+        self.exe_path = Some(exe.to_string());
+        self
+    }
     pub fn set_all(&mut self, all: bool) -> &mut Self {
         self.all = all;
         self
@@ -117,8 +132,11 @@ impl KpseWhich {
     }
 
     pub fn output<S: AsRef<OsStr>>(&self, file: S) -> io::Result<Vec<String>> {
-        info!(target: "KpathWhich Arguments", "{:#?}", self);
-        let mut cmd = Command::new("kpsewhich");
+        let kp_exe =
+            self.exe_path.as_ref().map(|v| v.as_str()).unwrap_or("kpsewhich");
+        info!(target: "KpseWhich command", "{}", kp_exe);
+        info!(target: "KpseWhich Arguments", "{:#?}", self);
+        let mut cmd = Command::new(kp_exe);
         if self.all {
             cmd.arg("-all");
         }
@@ -191,5 +209,84 @@ pub(crate) fn get_decoder(
     } else {
         Encoding::for_label(prefer.as_bytes())
             .ok_or(io::ErrorKind::Other.into())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use lazy_static::lazy_static;
+
+    use super::*;
+
+    lazy_static! {
+        static ref KPSEWHICH_EXE_FILE: String = get_var("KPSEWHICH_EXE_FILE")
+            .unwrap_or({
+                #[cfg(windows)]
+                let exe_paths: &[&str] = &[
+                    r"C:\texlive\bin\windows\kpsewhich.exe",
+                    r"D:\texlive\bin\windows\kpsewhich.exe",
+                    r"E:\texlive\bin\windows\kpsewhich.exe",
+                    r"C:\texlive\2025\bin\windows\kpsewhich.exe",
+                    r"D:\texlive\2025\bin\windows\kpsewhich.exe",
+                    r"E:\texlive\2025\bin\windows\kpsewhich.exe",
+                    r"C:\texlive\2024\bin\windows\kpsewhich.exe",
+                    r"D:\texlive\2024\bin\windows\kpsewhich.exe",
+                    r"E:\texlive\2024\bin\windows\kpsewhich.exe",
+                ];
+                #[cfg(target_os = "macos")]
+                let exe_paths: &[&str] = &[
+                    r"/usr/local/texlive/bin/universal-darwin/kpsewhich",
+                    r"/usr/local/texlive/2025/bin/universal-darwin/kpsewhich",
+                    r"/usr/local/texlive/2024/bin/universal-darwin/kpsewhich",
+                ];
+                #[cfg(not(any(windows, target_os = "macos")))]
+                let exe_paths: &[&str] = &[
+                    r"/usr/local/texlive/bin/x86_64-linux/kpsewhich",
+                    r"/usr/local/texlive/2025/bin/x86_64-linux/kpsewhich",
+                    r"/usr/local/texlive/2024/bin/x86_64-linux/kpsewhich",
+                ];
+
+                let mut exe_path = String::from("kpsewhich");
+                for path_name in exe_paths {
+                    if std::path::Path::new(path_name).is_file() {
+                        exe_path = path_name.to_string()
+                    }
+                }
+                exe_path
+            });
+    }
+
+    #[ignore]
+    #[test]
+    fn var_value() {
+        let kpse_exe = KPSEWHICH_EXE_FILE.as_str();
+        let var = "TEXMFHOME";
+        let res = KpseWhich::var_value_with_exe(var, kpse_exe, false);
+        assert!(res.is_some(), "Cannot find variable 'TEXMFHOME'");
+        let res = {
+            let res = res.unwrap();
+            res.trim_ascii().to_string()
+        };
+        assert!(
+            res.len() > 0,
+            "Invalid 'TEXMFHOME' value, maybe I did not read it properly"
+        );
+        println!("TEXMFHOME: '{}'", res);
+    }
+
+    #[ignore]
+    #[test]
+    fn get_value() {
+        let kpse_exe = KPSEWHICH_EXE_FILE.as_str();
+        let mut kpse = KpseWhich::new();
+        kpse.set_exe(kpse_exe)
+            .set_all(true)
+            .set_inputs(Some(r"./;./target//"));
+        let res = kpse.output("libtexhigh.rlib");
+        println!("{:#?}", res);
+
+        kpse.set_inputs(Some("./;./tests/Uıςօ۹Ⓔ文🤔/"));
+        let res = kpse.output("file.txt");
+        println!("{:#?}", res);
     }
 }

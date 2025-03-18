@@ -578,15 +578,17 @@ where
         });
         let is_in_tex_bin_dir = kpse_path.map_or(false, |p| p.exists());
         let tex_truetype_paths = if is_in_tex_bin_dir {
+            let kpse_exe = std::env::var("KPSEWHICH_EXE_FILE")
+                .unwrap_or(String::from("kpsewhich"));
             let mut res = vec![];
             if let Some(texmf_dist_dir) =
-                KpseWhich::var_value("TEXMFDIST", false)
+                KpseWhich::var_value_with_exe("TEXMFDIST", &kpse_exe, false)
             {
                 res.push(format!("{}/fonts/truetype", &texmf_dist_dir));
                 res.push(format!("{}/fonts/opentype", &texmf_dist_dir));
             }
             if let Some(texmf_local_dir) =
-                KpseWhich::var_value("TEXMFLOCAL", false)
+                KpseWhich::var_value_with_exe("TEXMFLOCAL", &kpse_exe, false)
             {
                 res.push(format!("{}/fonts/truetype", &texmf_local_dir));
                 res.push(format!("{}/fonts/opentype", &texmf_local_dir));
@@ -951,7 +953,11 @@ fn command_text(m: &ArgMatches) {
     let to_uni_seq = |s: &str| {
         let mut res = String::new();
         for c in s.chars() {
-            res.push_str(&format!("\\u{:04x}", c as u32));
+            if c as u32 > 0xFFFF {
+                res.push_str(&format!("\\u{{{:04x}}}", c as u32));
+            } else {
+                res.push_str(&format!("\\u{:04x}", c as u32));
+            }
         }
         res
     };

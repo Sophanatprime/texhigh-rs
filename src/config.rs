@@ -7,6 +7,7 @@ use smallvec::SmallVec;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fmt::Display;
 use std::hash::BuildHasherDefault;
+use std::ops::Deref;
 use std::path::Path;
 use std::slice::SliceIndex;
 use std::str::FromStr;
@@ -469,7 +470,9 @@ pub struct Category3 {
 
 impl Category3 {
     pub fn is_empty(&self) -> bool {
-        self.strings.is_empty() && self.regexset.is_empty() && self.regtexset.is_empty()
+        self.strings.is_empty()
+            && self.regexset.is_empty()
+            && self.regtexset.is_empty()
     }
     pub fn contains<'a>(&self, s: impl Into<Input<'a>>) -> bool {
         match s.into() {
@@ -637,6 +640,14 @@ impl CSCategories {
 #[derive(Debug, Serialize, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(transparent)]
 pub struct ShortInt(pub i16);
+
+impl Deref for ShortInt {
+    type Target = i16;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
 impl<'de> Deserialize<'de> for ShortInt {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
