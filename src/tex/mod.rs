@@ -2,12 +2,7 @@
 
 use bitflags::bitflags;
 use lazy_static::lazy_static;
-use pest::{iterators::Pairs, Parser};
 use regex::RegexSet;
-
-#[derive(pest_derive::Parser)]
-#[grammar = "tex/texcsname.pest"]
-pub struct LaTeXParser;
 
 bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -89,68 +84,6 @@ pub fn get_cs_type_re(input: &str) -> LaTeXType {
         }
     } else {
         LaTeXType::Other
-    }
-}
-
-pub fn get_cs_type(input: &str) -> LaTeXType {
-    match LaTeXParser::parse(Rule::cs, input) {
-        Ok(pairs) => {
-            let pair = pairs
-                .into_iter()
-                .next()
-                .unwrap()
-                .into_inner()
-                .into_iter()
-                .next()
-                .unwrap();
-            let typ = match pair.as_rule() {
-                Rule::csname_l3_primitive => LaTeXType::L3Primitive,
-                Rule::csname_l3_func_internal => LaTeXType::L3FunctionInternal,
-                Rule::csname_l3_func_pub => LaTeXType::L3FunctionPublic,
-                Rule::csname_l3_func_kernel => LaTeXType::L3FunctionKernel,
-                Rule::csname_l3_var_internal => LaTeXType::L3VariableInternal,
-                Rule::csname_l3_var_pub => LaTeXType::L3VariablePublic,
-                Rule::csname_l3_var_kernel => LaTeXType::L3VariableKernel,
-                Rule::csname_carmal_case_small => {
-                    LaTeXType::DocumentSmallCarmel
-                }
-                Rule::csname_pascal => LaTeXType::DocumentPascal,
-                Rule::csname_l2e_internal => LaTeXType::L2eInternal,
-                Rule::csname_l2e_kernel => LaTeXType::L2eKernel,
-                Rule::csname_punct => LaTeXType::Punctuation,
-                _ => LaTeXType::Other,
-            };
-            return typ;
-        }
-        Err(_) => return LaTeXType::Other,
-    }
-}
-
-pub fn cs_is_rule(input: &str, rule: Rule) -> bool {
-    get_cs_rules(input).contains(&rule)
-}
-
-pub fn get_cs_rules(input: &str) -> Vec<Rule> {
-    match LaTeXParser::parse(Rule::cs, input) {
-        Ok(pairs) => get_pairs_latex_rules(pairs),
-        Err(_) => {
-            vec![]
-        }
-    }
-}
-
-fn get_pairs_latex_rules<'a>(mut pairs: Pairs<'a, Rule>) -> Vec<Rule> {
-    let mut rules_vec = vec![];
-    loop {
-        match pairs.into_iter().next() {
-            Some(pair) => {
-                rules_vec.push(pair.as_rule());
-                pairs = pair.into_inner();
-            }
-            None => {
-                return rules_vec;
-            }
-        }
     }
 }
 

@@ -24,8 +24,6 @@ lazy_static = "1"
 log = "0"
 memchr = "*"
 mimalloc = "*"
-pest = "~2"
-pest_derive = "2"
 rapidfuzz = "*"
 rayon = "*"
 regex = "1"
@@ -53,5 +51,13 @@ yeslogic-unicode-blocks = "*"
 codepage = "*"
 winapi = { version = "*", features = ["winnls"] }
 
+[dev-dependencies]
+pest = "~2"
+pest_derive = "2"
+
 [profile.release]
 panic = "abort"
+
+[profile.release-windows]
+inherits = "release"
+panic = "unwind"

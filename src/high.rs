@@ -8,7 +8,7 @@ use std::{
 
 use crate::config::{HighConfig, Input};
 use crate::types::*;
-use crate::{get_cs_type_re, primitive_engine, LaTeXType};
+use crate::{get_cs_type, primitive_engine, LaTeXType};
 
 pub enum HighItemType<'a> {
     CS(&'a ControlSequence),
@@ -138,7 +138,7 @@ pub trait HighFormat {
     fn get_cs_catogery(&self, cs: &ControlSequence) -> CompactString {
         let engine = primitive_engine(cs.get_csname());
         if engine.is_empty() {
-            match get_cs_type_re(cs.get_csname()) {
+            match get_cs_type(cs.get_csname()) {
                 LaTeXType::L3Primitive => "latex3.primitive",
                 LaTeXType::L3FunctionInternal => "latex3.function.internal",
                 LaTeXType::L3FunctionPublic => "latex3.function.public",
@@ -419,7 +419,7 @@ impl HighFormat for StandardFormatter<'_> {
             None => {
                 let engine = primitive_engine(csname);
                 if engine.is_empty() {
-                    match get_cs_type_re(csname) {
+                    match get_cs_type(csname) {
                         LaTeXType::L3Primitive => "latex3.primitive",
                         LaTeXType::L3FunctionInternal => {
                             "latex3.function.internal"

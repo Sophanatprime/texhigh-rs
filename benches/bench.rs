@@ -79,7 +79,7 @@ mod basic {
 #[cfg(test)]
 mod tex {
     use super::test::{black_box, Bencher};
-    use texhigh::{get_cs_type, get_cs_type_re, LaTeXType};
+    use texhigh::{get_cs_type, LaTeXType};
 
     #[rustfmt::skip]
     const CS_NAMES: &[&str] = &[
@@ -92,7 +92,7 @@ mod tex {
     ];
 
     #[bench]
-    fn cs_name_pest(b: &mut Bencher) {
+    fn cs_name_regex(b: &mut Bencher) {
         b.iter(|| {
             black_box(CS_NAMES.iter().for_each(|&cs| {
                 let _ = match get_cs_type(cs) {
@@ -119,10 +119,11 @@ mod tex {
     }
 
     #[bench]
-    fn cs_name_regex(b: &mut Bencher) {
+    pub fn cs_name_pest(b: &mut Bencher) {
+        use pest_cs_type::get_cs_type;
         b.iter(|| {
             black_box(CS_NAMES.iter().for_each(|&cs| {
-                let _ = match get_cs_type_re(cs) {
+                let _ = match get_cs_type(cs) {
                     LaTeXType::L3Primitive => "latex3.primitive",
                     LaTeXType::L3FunctionInternal => {
                         "latex3.function.internal"
@@ -143,6 +144,59 @@ mod tex {
                 };
             }))
         });
+    }
+
+    mod pest_cs_type {
+        use pest::Parser;
+        use texhigh::LaTeXType;
+
+        #[derive(pest_derive::Parser)]
+        #[grammar = "benches/texcsname.pest"]
+        pub struct LaTeXParser;
+
+        pub fn get_cs_type(input: &str) -> LaTeXType {
+            match LaTeXParser::parse(Rule::cs, input) {
+                Ok(pairs) => {
+                    let pair = pairs
+                        .into_iter()
+                        .next()
+                        .unwrap()
+                        .into_inner()
+                        .into_iter()
+                        .next()
+                        .unwrap();
+                    let typ = match pair.as_rule() {
+                        Rule::csname_l3_primitive => LaTeXType::L3Primitive,
+                        Rule::csname_l3_func_internal => {
+                            LaTeXType::L3FunctionInternal
+                        }
+                        Rule::csname_l3_func_pub => {
+                            LaTeXType::L3FunctionPublic
+                        }
+                        Rule::csname_l3_func_kernel => {
+                            LaTeXType::L3FunctionKernel
+                        }
+                        Rule::csname_l3_var_internal => {
+                            LaTeXType::L3VariableInternal
+                        }
+                        Rule::csname_l3_var_pub => LaTeXType::L3VariablePublic,
+                        Rule::csname_l3_var_kernel => {
+                            LaTeXType::L3VariableKernel
+                        }
+                        Rule::csname_carmal_case_small => {
+                            LaTeXType::DocumentSmallCarmel
+                        }
+                        Rule::csname_pascal => LaTeXType::DocumentPascal,
+                        Rule::csname_l2e_internal => LaTeXType::L2eInternal,
+                        Rule::csname_l2e_kernel => LaTeXType::L2eKernel,
+                        Rule::csname_punct => LaTeXType::Punctuation,
+                        _ => LaTeXType::Other,
+                    };
+                    return typ;
+                }
+                Err(_) => return LaTeXType::Other,
+            }
+        }
     }
 }
 

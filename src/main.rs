@@ -5,6 +5,7 @@ use std::fs::{self, File};
 use std::io::{self, BufReader, BufWriter, Read};
 use std::iter::{empty, zip};
 use std::path::{absolute as absolute_path, Path, PathBuf};
+use std::process::Command;
 use std::str::FromStr;
 use std::time;
 
@@ -51,8 +52,17 @@ fn main() {
     }
 }
 
-fn external_subcommand(cmd: &str, _: Vec<&OsString>) {
-    eprintln!("Unknown subcommand '{}'", cmd)
+fn external_subcommand(cmd_name: &str, args: Vec<&OsString>) {
+    use which::which;
+    if let Ok(which_path) = which(cmd_name) {
+        let mut cmd = Command::new(&which_path);
+        cmd.args(&args).spawn().expect(&format!(
+            "Cannot run subcommand '{}' with args: '{:?}'",
+            cmd_name, args
+        ));
+    } else {
+        eprintln!("Unknown subcommand '{}'", cmd_name)
+    }
 }
 
 enum Formatter<'s> {

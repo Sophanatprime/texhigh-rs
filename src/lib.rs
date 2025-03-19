@@ -16,7 +16,7 @@ pub use language::{
 mod kpathsea;
 mod tex;
 pub use kpathsea::KpseWhich;
-pub use tex::{get_cs_type, get_cs_type_re, primitive_engine, LaTeXType};
+pub use tex::{get_cs_type_re as get_cs_type, primitive_engine, LaTeXType};
 pub mod config;
 pub mod fonts;
 pub mod high;
