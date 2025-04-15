@@ -75,6 +75,7 @@ impl<'i> From<&'i SourcedTokenList> for Input<'i> {
 pub trait CategorySpan:
     SliceIndex<str, Output = str>
     + SliceIndex<[u8], Output = [u8]>
+    + SliceIndex<[usize], Output = [usize]>
     + SliceIndex<[Token], Output = [Token]>
     + Clone
 {
@@ -82,6 +83,7 @@ pub trait CategorySpan:
 impl<
         T: SliceIndex<str, Output = str>
             + SliceIndex<[u8], Output = [u8]>
+            + SliceIndex<[usize], Output = [usize]>
             + SliceIndex<[Token], Output = [Token]>
             + Clone,
     > CategorySpan for T
@@ -510,7 +512,8 @@ impl Category3 {
             }
             Input::Span(_) => false,
             Input::String(s) => {
-                self.strings.contains(s) || self.regexset.is_match(&s[span])
+                self.strings.contains(&s[span.clone()])
+                    || self.regexset.is_match(&s[span])
             }
             Input::Bytes(b) => unsafe {
                 self.regtexset.is_match_bytes(&b[span])
@@ -523,10 +526,11 @@ impl Category3 {
                 self.regtexset.is_match_bytes(&b.bytes[span])
             },
             Input::SourcedTokenList(b) => {
-                self.regexset.is_match(&b.sources()[span.clone()])
-                    || unsafe {
-                        self.regtexset.is_match_bytes(&b.bytes()[span])
-                    }
+                b.source_get(span.clone())
+                    .is_some_and(|v| self.regexset.is_match(v))
+                    || b.bytes_get(span).is_some_and(|v| unsafe {
+                        self.regtexset.is_match_bytes(v)
+                    })
             }
         }
     }

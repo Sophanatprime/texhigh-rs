@@ -6,7 +6,7 @@ use compact_str::{format_compact, CompactString, ToCompactString};
 use log::warn;
 use rayon::prelude::*;
 
-use crate::config::{Category, HighConfig, LexerType};
+use crate::config::{Category, CategorySpan, HighConfig, LexerType};
 use crate::high::{HWrite, HighFormat};
 use crate::tex::{get_cs_type_re, primitive_engine, LaTeXType};
 use crate::types::{
@@ -90,14 +90,18 @@ impl SourcedTokenList {
         &self,
         index: usize,
     ) -> (&Token, &[u8], &str) {
-        let rng = (
+        let rng_bytes = (
             self.bytes_indices.get_unchecked(index),
             self.bytes_indices.get_unchecked(index + 1),
         );
+        let rng_source = (
+            self.source_indices.get_unchecked(index),
+            self.source_indices.get_unchecked(index + 1),
+        );
         (
             self.tl.get_unchecked(index),
-            self.bytes.get_unchecked(*rng.0 .. *rng.1),
-            self.source.get_unchecked(*rng.0 .. *rng.1),
+            self.bytes.get_unchecked(*rng_bytes.0 .. *rng_bytes.1),
+            self.source.get_unchecked(*rng_source.0 .. *rng_source.1),
         )
     }
     pub fn at(&self, index: usize) -> Option<(&Token, &[u8], &str)> {
@@ -105,6 +109,45 @@ impl SourcedTokenList {
             Some(unsafe { self.get_value_unchecked(index) })
         } else {
             None
+        }
+    }
+    pub fn tl_get(&self, span: impl CategorySpan) -> Option<&[Token]> {
+        self.tokenlist().get(span)
+    }
+    pub fn source_get(&self, span: impl CategorySpan) -> Option<&str> {
+        let s = &self.source_indices()[span];
+        if s.is_empty() {
+            return None;
+        }
+        if s.last() == self.source_indices.last() {
+            if s.len() == 1 {
+                return None;
+            }
+            self.source.get(s[0] .. s[s.len() - 1])
+        } else {
+            // We can asure that s.last() is not the last value of self.source_indices,
+            // hence, the next position of the s.last() can be got safely.
+            let last =
+                unsafe { *(s.last().unwrap() as *const usize).offset(1) };
+            self.source.get(s[0] .. last)
+        }
+    }
+    pub fn bytes_get(&self, span: impl CategorySpan) -> Option<&[u8]> {
+        let s = &self.bytes_indices()[span];
+        if s.is_empty() {
+            return None;
+        }
+        if s.last() == self.bytes_indices.last() {
+            if s.len() == 1 {
+                return None;
+            }
+            self.bytes.get(s[0] .. s[s.len() - 1])
+        } else {
+            // We can asure that s.last() is not the last value of self.bytes_indices,
+            // hence, the next position of the s.last() can be got safely.
+            let last =
+                unsafe { *(s.last().unwrap() as *const usize).offset(1) };
+            self.bytes.get(s[0] .. last)
         }
     }
     pub fn to_str_repr(&self) -> String {
@@ -644,19 +687,36 @@ impl<'a> SourcedFormatter<'a> {
             self.fmt_raw(
                 stream,
                 format_args!("\\THch{{{}}}{{{}}}", &cc, &chr_e),
-            )
+            )?;
         } else if chr.is_punct() {
-            self.fmt_raw(stream, format_args!("\\THpn{{?}}{{{}}}", &chr_e))
+            self.fmt_raw(stream, format_args!("\\THpn{{?}}{{{}}}", &chr_e))?;
         } else {
             if chr_s == &chr_e {
-                self.fmt_raw(stream, format_args!("{}", chr_s))
+                self.fmt_raw(stream, format_args!("{}", chr_s))?;
             } else {
                 self.fmt_raw(
                     stream,
                     format_args!("\\THch{{{}}}{{{}}}", &cc, &chr_e),
-                )
+                )?;
             }
         }
+
+        if self.high_config.break_at.contains(chr.charcode) {
+            let tokenlist = self.tokenlist.as_ref();
+            let index = self.index.get();
+            let no_break = self
+                .high_config
+                .do_not_break
+                .par_iter()
+                .any(|v| v.contains_at(tokenlist, .. index));
+            if no_break {
+                log::trace!("Do not break before the token: {:?}", chr);
+            } else {
+                self.fmt_break(stream, "char")?;
+            }
+        }
+
+        Ok(())
     }
 }
 impl<'a> HighFormat for SourcedFormatter<'a> {
@@ -727,19 +787,6 @@ impl<'a> HighFormat for SourcedFormatter<'a> {
         if self.is_newline(chr) {
             self.fmt_newline(stream)
         } else {
-            if self.high_config.break_at.contains(chr.charcode) {
-                let tokenlist = self.tokenlist.as_ref();
-                let index = self.index.get();
-                let no_break = self
-                    .high_config
-                    .do_not_break
-                    .par_iter()
-                    .any(|v| v.contains_at(tokenlist, .. index));
-                if !no_break {
-                    self.fmt_break(stream, "char")?;
-                }
-            }
-
             let source = self.source_at(self.index.get());
             // should take catcode into consideration?
             if matches!(source, "\r" | "\n" | "\r\n" | "\n\r") {
@@ -763,7 +810,27 @@ impl<'a> HighFormat for SourcedFormatter<'a> {
                         &self.get_chr_catogery(chr),
                         &escaped
                     ),
-                )
+                )?;
+
+                if self.high_config.break_at.contains(chr.charcode) {
+                    let tokenlist = self.tokenlist.as_ref();
+                    let index = self.index.get();
+                    let no_break = self
+                        .high_config
+                        .do_not_break
+                        .par_iter()
+                        .any(|v| v.contains_at(tokenlist, .. index));
+                    if no_break {
+                        log::trace!(
+                            "Do not break before the token: {:?}",
+                            chr
+                        );
+                    } else {
+                        self.fmt_break(stream, "char")?;
+                    }
+                }
+
+                Ok(())
             }
         }
     }
@@ -779,15 +846,18 @@ impl<'a> HighFormat for SourcedFormatter<'a> {
             .do_not_break
             .par_iter()
             .any(|v| v.contains_at(tokenlist, .. index));
-        if !no_break {
+
+        if no_break {
+            log::trace!("Do not break before the token: {:?}", cs);
+        } else {
             self.fmt_break(stream, "char")?;
         }
 
-        let cs_source = self.source_at(self.index.get());
+        let cs_source = self.source_at(index);
         let escape_char_len = cs_source
             .chars()
             .next()
-            .expect(&format!("Invalid token at index {}", self.index.get()))
+            .expect(&format!("Invalid token at index {}", index))
             .len_utf8();
         assert!(
             escape_char_len > 0,
@@ -897,6 +967,49 @@ mod tests {
                 32, 33, 34, 35, 36, 37, 38, 39, 41
             ]
         );
+        assert_eq!(stl.source_indices.len(), stl.bytes_indices.len());
+    }
+
+    #[test]
+    fn index() {
+        let s = String::from(r#"\input{a\stripquote\ {"some$file"}.tex}\."#);
+        let ref mut lexer = LexerType::default();
+        let ref ctabset = CTabSet::new_empty();
+        let mut cat = CatCodeStack::new();
+        cat.push(CTab::document());
+        let stl =
+            SourcedTokenList::parse(s.into(), &mut cat, (lexer, ctabset));
+
+        let (t, _b, s) = stl.at(0).unwrap();
+        assert_eq!(t, &Token::new_cs("input"));
+        assert_eq!(s, r"\input");
+
+        let (t, _b, s) = stl.at(6).unwrap();
+        assert_eq!(t, &Token::new_char('"', CatCode::Other));
+        assert_eq!(s, "\"");
+
+        let (t, _b, s) = stl.at(23).unwrap();
+        assert_eq!(t, &Token::new_cs("."));
+        assert_eq!(s, r"\.");
+
+        assert_eq!(None, stl.at(24));
+
+        assert_eq!(
+            stl.tl_get(.. 5),
+            Some(
+                &[
+                    Token::new_cs("input"),
+                    Token::new_char('{', CatCode::BeginGroup),
+                    Token::new_char('a', CatCode::Letter),
+                    Token::new_cs("stripquote"),
+                    Token::new_cs(" "),
+                ][..]
+            )
+        );
+        assert_eq!(stl.source_get(.. 5), Some(r"\input{a\stripquote\ "));
+
+        assert_eq!(stl.tl_get(23 ..), Some(&[Token::new_cs(".")][..]));
+        assert_eq!(stl.source_get(23 ..), Some(r"\."));
     }
 
     #[test]

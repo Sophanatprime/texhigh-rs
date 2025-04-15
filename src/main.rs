@@ -995,7 +995,7 @@ fn command_text(m: &ArgMatches) {
     let nor_text = if m.contains_id("normalization") {
         let typ = &get_command_str(m, "normalization");
         if typ == "nfd" {
-            text.nfc().collect::<String>()
+            text.nfd().collect::<String>()
         } else if typ == "nfkd" {
             text.nfkd().collect::<String>()
         } else if typ == "nfc" {
@@ -1063,7 +1063,9 @@ fn command_text(m: &ArgMatches) {
         writeln!(
             ioout,
             "{}",
-            &if m.get_flag("to-unicode") {
+            &if m.contains_id("normalization") {
+                nor_text
+            } else if m.get_flag("to-unicode") {
                 to_uni_seq(text)
             } else {
                 from_uni_seq(raw_text)
@@ -1071,8 +1073,16 @@ fn command_text(m: &ArgMatches) {
         )
         .expect("Cannot write to stream");
     } else if m.get_flag("to-unicode") {
-        writeln!(ioout, "{}", &to_uni_seq(raw_text))
-            .expect("Cannot write to stream");
+        writeln!(
+            ioout,
+            "{}",
+            &to_uni_seq(if m.contains_id("normalization") {
+                &nor_text
+            } else {
+                raw_text
+            })
+        )
+        .expect("Cannot write to stream");
     } else {
         writeln!(ioout, "{}", &nor_text).expect("Cannot write to stream");
     }

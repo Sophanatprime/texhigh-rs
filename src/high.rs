@@ -479,7 +479,11 @@ impl HighFormat for StandardFormatter<'_> {
                     escape_string(chr.charcode.encode_utf8(&mut s), b'^')
                 },
             ),
-        )
+        )?;
+        if self.high_config.break_at.contains(chr.charcode) {
+            self.fmt_break(stream, "?")?;
+        }
+        Ok(())
     }
     fn fmt_chr<T: HWrite>(
         &self,
@@ -489,9 +493,6 @@ impl HighFormat for StandardFormatter<'_> {
         if self.is_newline(chr) {
             self.fmt_newline(stream)
         } else {
-            if self.high_config.break_at.contains(chr.charcode) {
-                self.fmt_break(stream, "?")?;
-            }
             self.fmt_raw(
                 stream,
                 format_args!(
@@ -507,7 +508,11 @@ impl HighFormat for StandardFormatter<'_> {
                         escape_string_small(&chr.escape_control(b'^'), b'^')
                     }
                 ),
-            )
+            )?;
+            if self.high_config.break_at.contains(chr.charcode) {
+                self.fmt_break(stream, "?")?;
+            }
+            Ok(())
         }
     }
     fn fmt_cs<T: HWrite>(
