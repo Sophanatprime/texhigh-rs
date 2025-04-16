@@ -309,6 +309,7 @@ fn parse_tokenlist<'c, 'i: 'c, 'l: 'c + 'i>(
             source_index += cir_len;
             col += cir_len as u32;
             update_ctab!();
+            cat = catcode.catcode_value(chr).unwrap_or(cat);
             chr
         } else {
             chr

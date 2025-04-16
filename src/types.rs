@@ -2557,11 +2557,14 @@ impl TokenList {
         let mut collect_cs = false;
 
         while let Some(chr) = source.next() {
-            let cat = catcode.catcode_value(chr).unwrap_or_default();
+            let mut cat = catcode.catcode_value(chr).unwrap_or_default();
             let chr = if cat == CatCode::Superscript {
                 let (chr, n) =
                     circumflex_mechanism(catcode, source.clone(), chr);
-                source.advance_by(n).unwrap();
+                if n > 0 {
+                    source.advance_by(n).unwrap();
+                    cat = catcode.catcode_value(chr).unwrap_or(cat);
+                }
                 chr
             } else {
                 chr
@@ -3208,6 +3211,36 @@ mod tests {
         assert_eq!(ctab_cjk.get('\u{3400}'), Some(Letter));
         assert_eq!(ctab_cjk.get('\u{20794}'), None);
         assert_eq!(ctab_cjk.get('\x20'), None);
+    }
+
+    #[test]
+    fn circumflex() {
+        let mut chars = r"^^65lax".chars();
+        let chr = chars.next().unwrap();
+        let (new_chr, advance) =
+            circumflex_mechanism(&CTab::document(), chars, chr);
+        assert_eq!(advance, 3);
+        assert_eq!(new_chr, '\x65');
+
+        let mut chars = r"^^Ilax".chars();
+        let chr = chars.next().unwrap();
+        let (new_chr, advance) =
+            circumflex_mechanism(&CTab::document(), chars, chr);
+        assert_eq!(advance, 2);
+        assert_eq!(new_chr, '\t');
+
+        let mut chars = r"^^elax".chars();
+        let chr = chars.next().unwrap();
+        let (new_chr, advance) =
+            circumflex_mechanism(&CTab::document(), chars, chr);
+        assert_eq!(advance, 2);
+        assert_eq!(new_chr, '%');
+
+        let mut chars = r"^^^^6500lax".chars();
+        let chr = chars.next().unwrap();
+        let (new_chr, advance) = circumflex_mechanism(&CTab::document(), chars, chr);
+        assert_eq!(advance, 7);
+        assert_eq!(new_chr, '\u{6500}');
     }
 
     #[test]
