@@ -4,6 +4,9 @@ use bitflags::bitflags;
 use lazy_static::lazy_static;
 use regex::RegexSet;
 
+mod circumflex;
+pub use circumflex::circumflex_mechanism;
+
 bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct LaTeXType: u16 {

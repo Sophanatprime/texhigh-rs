@@ -8,12 +8,12 @@ use rayon::prelude::*;
 
 use crate::config::{Category, CategorySpan, HighConfig, LexerType};
 use crate::high::{HWrite, HighFormat};
+use crate::tex::circumflex_mechanism;
 use crate::tex::{get_cs_type_re, primitive_engine, LaTeXType};
 use crate::types::{
-    circumflex_mechanism, escape_string, escape_string_filter,
-    escape_string_small, CTabSet, CatCode, CatCodeGetter, CatCodeStack,
-    Character, ControlSequence, ErrorKind, Position, Token, TokenListBytes,
-    TokenListBytesRef,
+    escape_string, escape_string_filter, escape_string_small, CTabSet,
+    CatCode, CatCodeGetter, CatCodeStack, Character, ControlSequence,
+    ErrorKind, Position, Token, TokenListBytes, TokenListBytesRef,
 };
 
 #[derive(Debug)]

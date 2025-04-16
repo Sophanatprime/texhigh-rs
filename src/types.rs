@@ -26,6 +26,7 @@ use crate::config::{Category, LexerAction, LexerCatCodeKind, LexerType};
 use crate::range::{
     parse_num, parse_num_range, try_get_char, MinMaxValue, NumberSpan,
 };
+use crate::tex::circumflex_mechanism;
 use crate::unicode::{
     get_char_range_from_block_name as get_from_block,
     get_cjk_ideographs_blocks,
@@ -2670,95 +2671,6 @@ impl<'b> TokenListBytesRef<'b> {
     }
 }
 
-pub(crate) fn circumflex_mechanism<'c, C: CatCodeGetter>(
-    catcode: &C,
-    mut chars: Chars<'c>,
-    mut chr: char,
-) -> (char, usize) {
-    let mut advance = 1;
-    let mut last_char = None;
-
-    fn more1(chr: &mut char, advance: &mut usize) {
-        if matches!(chr, '0'..='9' | 'a'..='z') {
-            *chr = char::from_u32(
-                u32::from_str_radix(&format!("{}{}", *chr, *chr), 16).unwrap(),
-            )
-            .unwrap();
-            *advance = 3;
-        } else if (*chr as u32) < 128 {
-            *chr = if (*chr as u8) < 64 {
-                ((*chr as u8) + 0o100) as char
-            } else {
-                ((*chr as u8) - 0o100) as char
-            };
-            *advance = 2;
-        } else {
-            *advance = 0;
-        }
-    }
-    fn more2(chr: &mut char, c1: char, c2: Option<char>, advance: &mut usize) {
-        if matches!(c1, '0'..='9' | 'a'..='f') {
-            match c2 {
-                Some(c2) if matches!(c2, '0'..='9' | 'a'..='f') => {
-                    *chr = char::from_u32(
-                        u32::from_str_radix(&format!("{}{}", c1, c2), 16)
-                            .unwrap(),
-                    )
-                    .unwrap();
-                    *advance = 3;
-                }
-                _ => {
-                    *chr = if (c1 as u32) < 64 {
-                        ((c1 as u8) + 0o100) as char
-                    } else {
-                        ((c1 as u8) - 0o100) as char
-                    };
-                    *advance = 2;
-                }
-            }
-        } else if (c1 as u32) < 128 {
-            *chr = if (c1 as u8) < 64 {
-                ((c1 as u8) + 0o100) as char
-            } else {
-                ((c1 as u8) - 0o100) as char
-            };
-            *advance = 2;
-        } else {
-            *advance = 0;
-        }
-    }
-
-    while let Some(next_char) = chars.next() {
-        if next_char == chr
-            && catcode.catcode_value(chr) == Some(CatCode::Superscript)
-        {
-            advance += 1;
-            if advance > 4 {
-                last_char = Some(next_char);
-                break;
-            }
-        } else {
-            last_char = Some(next_char);
-            break;
-        }
-    }
-    match advance {
-        0 | 1 => return (chr, 0),
-        2 => match last_char {
-            Some(last_char) => {
-                more2(&mut chr, last_char, chars.next(), &mut advance)
-            }
-            None => advance = 0,
-        },
-        3 => {
-            let c1 = chr;
-            more2(&mut chr, c1, last_char, &mut advance)
-        }
-        _ => more1(&mut chr, &mut advance),
-    }
-    (chr, advance)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3211,36 +3123,6 @@ mod tests {
         assert_eq!(ctab_cjk.get('\u{3400}'), Some(Letter));
         assert_eq!(ctab_cjk.get('\u{20794}'), None);
         assert_eq!(ctab_cjk.get('\x20'), None);
-    }
-
-    #[test]
-    fn circumflex() {
-        let mut chars = r"^^65lax".chars();
-        let chr = chars.next().unwrap();
-        let (new_chr, advance) =
-            circumflex_mechanism(&CTab::document(), chars, chr);
-        assert_eq!(advance, 3);
-        assert_eq!(new_chr, '\x65');
-
-        let mut chars = r"^^Ilax".chars();
-        let chr = chars.next().unwrap();
-        let (new_chr, advance) =
-            circumflex_mechanism(&CTab::document(), chars, chr);
-        assert_eq!(advance, 2);
-        assert_eq!(new_chr, '\t');
-
-        let mut chars = r"^^elax".chars();
-        let chr = chars.next().unwrap();
-        let (new_chr, advance) =
-            circumflex_mechanism(&CTab::document(), chars, chr);
-        assert_eq!(advance, 2);
-        assert_eq!(new_chr, '%');
-
-        let mut chars = r"^^^^6500lax".chars();
-        let chr = chars.next().unwrap();
-        let (new_chr, advance) = circumflex_mechanism(&CTab::document(), chars, chr);
-        assert_eq!(advance, 7);
-        assert_eq!(new_chr, '\u{6500}');
     }
 
     #[test]
