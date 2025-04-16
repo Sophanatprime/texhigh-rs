@@ -10,7 +10,7 @@
 
 # 构建
 
-确保 Rust 环境已正确安装并且已下载 nightly 频道（`>=1.86.0`）。
+确保 Rust 环境已正确安装并且已下载 nightly 频道（`>=1.87.0`）。
 ```bash
 git clone https://github.com/Sophanatprime/texhigh-rs.git
 cd texhigh-rs && cargo +nightly build --release

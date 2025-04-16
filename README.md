@@ -10,7 +10,7 @@ Copy the executable file to the `bin` directory of your TeX environment, ensurin
 
 ## Building
 
-Ensure that the Rust environment is correctly installed and that the nightly channel (`>=1.86.0`) is installed.
+Ensure that the Rust environment is correctly installed and that the nightly channel (`>=1.87.0`) is installed.
 
 ```bash
 git clone https://github.com/Sophanatprime/texhigh-rs.git
