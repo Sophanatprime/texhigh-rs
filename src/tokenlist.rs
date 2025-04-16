@@ -308,8 +308,9 @@ fn parse_tokenlist<'c, 'i: 'c, 'l: 'c + 'i>(
             let cir_len = s_start - s_iter.as_str().len();
             source_index += cir_len;
             col += cir_len as u32;
+            curr_char_len += cir_len;
             update_ctab!();
-            cat = catcode.catcode_value(chr).unwrap_or(cat);
+            cat = catcode.catcode_value(chr).unwrap_or_default();
             chr
         } else {
             chr
@@ -925,20 +926,31 @@ mod tests {
 
     #[test]
     fn basic() {
-        let s = String::from(r#"\input{a\stripquote\ {"some$file"}.tex}\."#);
+        let s = String::from(r#"\input{a\s^^74quote\ {"some$file"}.tex}\^^n"#);
         let ref mut lexer = LexerType::default();
         let ref ctabset = CTabSet::new_empty();
         let mut cat = CatCodeStack::new();
         cat.push(CTab::document());
         let stl =
             SourcedTokenList::parse(s.into(), &mut cat, (lexer, ctabset));
+
+        {
+            let stl = SourcedTokenList::parse(
+                String::from(r"\a^^^^4e00lax").into(),
+                &mut cat,
+                (lexer, ctabset),
+            );
+            println!("{}", stl.to_str_repr());
+            stl.source_indices().iter().for_each(|v| println!("{:?}", v));
+        }
+
         assert_eq!(
             stl.tokenlist(),
             &[
                 Token::CS(ControlSequence::new_cwo("input")),
                 Token::Char(Character::new('{', CatCode::BeginGroup)),
                 Token::Char(Character::new('a', CatCode::Letter)),
-                Token::CS(ControlSequence::new_cwo("stripquote")),
+                Token::CS(ControlSequence::new_cwo("stquote")),
                 Token::CS(ControlSequence::new_csp()),
                 Token::Char(Character::new('{', CatCode::BeginGroup)),
                 Token::Char(Character::new('"', CatCode::Other)),
@@ -965,7 +977,7 @@ mod tests {
             stl.source_indices(),
             &[
                 0, 6, 7, 8, 19, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31,
-                32, 33, 34, 35, 36, 37, 38, 39, 41
+                32, 33, 34, 35, 36, 37, 38, 39, 43
             ]
         );
         assert_eq!(stl.source_indices.len(), stl.bytes_indices.len());
@@ -973,7 +985,7 @@ mod tests {
 
     #[test]
     fn index() {
-        let s = String::from(r#"\input{a\stripquote\ {"some$file"}.tex}\."#);
+        let s = String::from(r#"\input{a\s^^74quote\ {"some$file"}.tex}\^^n"#);
         let ref mut lexer = LexerType::default();
         let ref ctabset = CTabSet::new_empty();
         let mut cat = CatCodeStack::new();
@@ -991,7 +1003,7 @@ mod tests {
 
         let (t, _b, s) = stl.at(23).unwrap();
         assert_eq!(t, &Token::new_cs("."));
-        assert_eq!(s, r"\.");
+        assert_eq!(s, r"\^^n");
 
         assert_eq!(None, stl.at(24));
 
@@ -1002,15 +1014,15 @@ mod tests {
                     Token::new_cs("input"),
                     Token::new_char('{', CatCode::BeginGroup),
                     Token::new_char('a', CatCode::Letter),
-                    Token::new_cs("stripquote"),
+                    Token::new_cs("stquote"),
                     Token::new_cs(" "),
                 ][..]
             )
         );
-        assert_eq!(stl.source_get(.. 5), Some(r"\input{a\stripquote\ "));
+        assert_eq!(stl.source_get(.. 5), Some(r"\input{a\s^^74quote\ "));
 
         assert_eq!(stl.tl_get(23 ..), Some(&[Token::new_cs(".")][..]));
-        assert_eq!(stl.source_get(23 ..), Some(r"\."));
+        assert_eq!(stl.source_get(23 ..), Some(r"\^^n"));
     }
 
     #[test]

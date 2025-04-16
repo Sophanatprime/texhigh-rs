@@ -2564,7 +2564,7 @@ impl TokenList {
                     circumflex_mechanism(catcode, source.clone(), chr);
                 if n > 0 {
                     source.advance_by(n).unwrap();
-                    cat = catcode.catcode_value(chr).unwrap_or(cat);
+                    cat = catcode.catcode_value(chr).unwrap_or_default();
                 }
                 chr
             } else {
