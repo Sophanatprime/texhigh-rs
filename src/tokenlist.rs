@@ -400,7 +400,7 @@ pub struct SourcedFormatter<'a> {
     high_config: &'a HighConfig,
     tokenlist: Arc<SourcedTokenList>,
     group_level: Cell<isize>,
-    index: Cell<usize>,
+    index: Cell<usize>, // index <= tokenlist.tokenlist().len()
     #[allow(dead_code)]
     range: Cell<usize>, //TODO: detect ranges, i.e. arguments of macros
 }
@@ -540,13 +540,14 @@ impl<'a> SourcedFormatter<'a> {
             range: Cell::new(0),
         }
     }
-    pub fn source_at(&self, index: usize) -> &str {
-        let source = self.tokenlist.source.as_ref();
+    unsafe fn source_at(&self, index: usize) -> &str {
         let s_index_start =
-            unsafe { self.tokenlist.source_indices.get_unchecked(index - 1) };
-        let s_index_end =
-            unsafe { self.tokenlist.source_indices.get_unchecked(index) };
-        &source[*s_index_start .. *s_index_end]
+            self.tokenlist.source_indices.get_unchecked(index - 1);
+        let s_index_end = self.tokenlist.source_indices.get_unchecked(index);
+        self.tokenlist.source.get_unchecked(*s_index_start .. *s_index_end)
+    }
+    pub fn source_of_current(&self) -> &str {
+        unsafe { self.source_at(self.index.get()) }
     }
     fn write_string<'t, T: HWrite>(
         &self,
@@ -673,7 +674,7 @@ impl<'a> SourcedFormatter<'a> {
         stream: &mut T,
         chr: &Character,
     ) -> Result<(), ErrorKind> {
-        let chr_s = self.source_at(self.index.get());
+        let chr_s = self.source_of_current();
         let cc = self.get_chr_catogery(chr);
         let chr_e = if self.high_config.char_replacements.is_empty() {
             escape_string_small(chr_s, b'^')
@@ -781,6 +782,11 @@ impl<'a> HighFormat for SourcedFormatter<'a> {
             CompactString::const_new("?")
         }
     }
+    fn is_newline(&self, _: &Character) -> bool {
+        let source = self.source_of_current();
+        // should take catcode into consideration?
+        matches!(source, "\r" | "\n" | "\r\n" | "\n\r")
+    }
     fn fmt_chr<T: HWrite>(
         &self,
         stream: &mut T,
@@ -789,51 +795,42 @@ impl<'a> HighFormat for SourcedFormatter<'a> {
         if self.is_newline(chr) {
             self.fmt_newline(stream)
         } else {
-            let source = self.source_at(self.index.get());
-            // should take catcode into consideration?
-            if matches!(source, "\r" | "\n" | "\r\n" | "\n\r") {
-                self.fmt_newline(stream)
+            let source = self.source_of_current();
+            let escaped = if self.high_config.char_replacements.is_empty() {
+                escape_string_small(source, b'^')
             } else {
-                let escaped = if self.high_config.char_replacements.is_empty()
-                {
-                    escape_string_small(source, b'^')
+                escape_string_filter(
+                    source,
+                    b'^',
+                    |v| self.high_config.char_replacements.contains(&v),
+                    |v| self.get_char_replacement(v),
+                )
+            };
+            self.fmt_raw(
+                stream,
+                format_args!(
+                    "\\THch{{{}}}{{{}}}",
+                    &self.get_chr_catogery(chr),
+                    &escaped
+                ),
+            )?;
+
+            if self.high_config.break_at.contains(chr.charcode) {
+                let tokenlist = self.tokenlist.as_ref();
+                let index = self.index.get();
+                let no_break = self
+                    .high_config
+                    .do_not_break
+                    .par_iter()
+                    .any(|v| v.contains_at(tokenlist, .. index));
+                if no_break {
+                    log::trace!("Do not break before the token: {:?}", chr);
                 } else {
-                    escape_string_filter(
-                        source,
-                        b'^',
-                        |v| self.high_config.char_replacements.contains(&v),
-                        |v| self.get_char_replacement(v),
-                    )
-                };
-                self.fmt_raw(
-                    stream,
-                    format_args!(
-                        "\\THch{{{}}}{{{}}}",
-                        &self.get_chr_catogery(chr),
-                        &escaped
-                    ),
-                )?;
-
-                if self.high_config.break_at.contains(chr.charcode) {
-                    let tokenlist = self.tokenlist.as_ref();
-                    let index = self.index.get();
-                    let no_break = self
-                        .high_config
-                        .do_not_break
-                        .par_iter()
-                        .any(|v| v.contains_at(tokenlist, .. index));
-                    if no_break {
-                        log::trace!(
-                            "Do not break before the token: {:?}",
-                            chr
-                        );
-                    } else {
-                        self.fmt_break(stream, "char")?;
-                    }
+                    self.fmt_break(stream, "char")?;
                 }
-
-                Ok(())
             }
+
+            Ok(())
         }
     }
     fn fmt_cs<T: HWrite>(
@@ -855,7 +852,7 @@ impl<'a> HighFormat for SourcedFormatter<'a> {
             self.fmt_break(stream, "char")?;
         }
 
-        let cs_source = self.source_at(index);
+        let cs_source = unsafe { self.source_at(index) };
         let escape_char_len = cs_source
             .chars()
             .next()
