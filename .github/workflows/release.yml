@@ -1,4 +1,4 @@
-name: Release
+pname: Release
 
 permissions:
   contents: write
@@ -16,14 +16,11 @@ jobs:
     steps:
       - name: Create Release
         id: create_release
-        uses: actions/create-release@v1
+        uses: ncipollo/release-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tag_name: ${{ github.ref }}
-          release_name: Release ${{ github.ref }}
-          draft: false
-          prerelease: false
+          allowUpdates: "true"
 
   build:
     needs: create_release
