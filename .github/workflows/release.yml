@@ -41,10 +41,21 @@ jobs:
         toolchain: nightly
         targets: ${{ matrix.target }}
 
+    - name: Add target platforms
+      run: rustup target add ${{ matrix.target }}
+
+    - name: Install musl tools
+      if: matrix.target == 'x86_64-unknown-linux-musl'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y musl-tools musl-dev
+
     - name: Build project
       run: cargo build --profile ${{ matrix.profile }} --target ${{ matrix.target }} --verbose
       env:
-        RUSTFLAGS: -C target-feature=+crt-static
+        RUSTFLAGS: >
+          ${{ matrix.target == 'x86_64-pc-windows-msvc' && '-C target-feature=+crt-static' || '' }}
+          ${{ matrix.target == 'x86_64-unknown-linux-musl' && '-C link-arg=-s' || '' }}
 
     - name: Create output directory
       run: mkdir release-package
@@ -55,8 +66,15 @@ jobs:
         Copy-Item "target\${{ matrix.target }}\${{ matrix.profile }}\${{ matrix.artifact_name }}" release-package/
         7z a -tzip texhigh-${{ matrix.target }}.zip ./release-package/*
 
-    - name: Prepare Unix artifacts
-      if: contains(matrix.os, 'ubuntu') || contains(matrix.os, 'macos')
+    - name: Prepare Linux musl artifacts
+      if: matrix.target == 'x86_64-unknown-linux-musl'
+      run: |
+        cp "target/${{ matrix.target }}/${{ matrix.profile }}/${{ matrix.artifact_name }}" release-package/
+        chmod +x release-package/${{ matrix.artifact_name }}
+        tar czf texhigh-${{ matrix.target }}.tar.gz -C release-package .
+
+    - name: Prepare macOS artifacts
+      if: matrix.target == 'x86_64-apple-darwin'
       run: |
         cp "target/${{ matrix.target }}/${{ matrix.profile }}/${{ matrix.artifact_name }}" release-package/
         chmod +x release-package/${{ matrix.artifact_name }}
@@ -66,6 +84,7 @@ jobs:
       uses: softprops/action-gh-release@v1
       with:
         tag_name: ${{ github.ref_name }}
-        files: texhigh-${{ matrix.target }}.${{ matrix.package_ext }}
+        files: |
+          texhigh-${{ matrix.target }}.${{ matrix.package_ext }}
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
