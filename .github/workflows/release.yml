@@ -1,4 +1,4 @@
-pname: Release
+name: Release
 
 permissions:
   contents: write
@@ -9,85 +9,67 @@ on:
       - v[0-9]+.*
 
 jobs:
-  create_release:
-    runs-on: ubuntu-latest
-    outputs:
-      upload_url: ${{ steps.create_release.outputs.upload_url }}
-    steps:
-      - name: Create Release
-        id: create_release
-        uses: ncipollo/release-action@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          allowUpdates: "true"
-
-  build:
-    needs: create_release
+  build-release:
+    runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
         include:
-          - target: "x86_64-pc-windows-msvc"
-            os: "windows-latest"
-            binary_suffix: ".exe"
-          - target: "x86_64-unknown-linux-gnu"
-            os: "ubuntu-latest"
-            binary_suffix: ""
-          - target: "x86_64-apple-darwin"
-            os: "macos-latest"
-            binary_suffix: ""
-    runs-on: ${{ matrix.os }}
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            artifact_name: texhigh.exe
+            package_ext: zip
+            profile: release-windows
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            artifact_name: texhigh
+            package_ext: tar.gz
+            profile: release
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            artifact_name: texhigh
+            package_ext: tar.gz
+            profile: release
+
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v3
+    - name: Checkout repository
+      uses: actions/checkout@v4
 
-      - name: Setup Rust Nightly Toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: nightly
-          override: true
-          target: ${{ matrix.target }}
+    - name: Install Rust nightly
+      uses: dtolnay/rust-toolchain@master
+      with:
+        toolchain: nightly
+        targets: ${{ matrix.target }}
 
-      - name: Add target if needed
-        run: rustup target add ${{ matrix.target }}
+    - name: Add Windows target (if needed)
+      if: matrix.os == 'windows-latest'
+      run: rustup target add ${{ matrix.target }}
 
-      - name: Build binary for Windows (release-windows profile)
-        if: matrix.target == 'x86_64-pc-windows-msvc'
-        run: cargo build --target ${{ matrix.target }} --profile release-windows
+    - name: Build project
+      run: cargo build --profile ${{ matrix.profile }} --target ${{ matrix.target }} --verbose
+      env:
+        RUSTFLAGS: -C target-feature=+crt-static
 
-      - name: Build binary for Unix (default release profile)
-        if: matrix.target != 'x86_64-pc-windows-msvc'
-        run: cargo build --release --target ${{ matrix.target }}
+    - name: Create output directory
+      run: mkdir release-package
 
-      - name: Package binary on Windows (zip)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          Compress-Archive -Path "./target/${{ matrix.target }}/release/texhigh${{ matrix.binary_suffix }}" -DestinationPath "texhigh-${{ matrix.target }}.zip" -Force
+    - name: Prepare Windows artifacts
+      if: matrix.os == 'windows-latest'
+      run: |
+        Copy-Item "target\${{ matrix.target }}\${{ matrix.profile }}\${{ matrix.artifact_name }}" release-package/
+        7z a -tzip texhigh-${{ matrix.target }}.zip ./release-package/*
 
-      - name: Package binary on Unix (tar.gz)
-        if: runner.os != 'Windows'
-        run: |
-          tar -czvf texhigh-${{ matrix.target }}.tar.gz -C ./target/${{ matrix.target }}/release texhigh
+    - name: Prepare Unix artifacts
+      if: contains(matrix.os, 'ubuntu') || contains(matrix.os, 'macos')
+      run: |
+        cp "target/${{ matrix.target }}/${{ matrix.profile }}/${{ matrix.artifact_name }}" release-package/
+        chmod +x release-package/${{ matrix.artifact_name }}
+        tar czf texhigh-${{ matrix.target }}.tar.gz -C release-package .
 
-      - name: Upload asset (Windows)
-        if: runner.os == 'Windows'
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ needs.create_release.outputs.upload_url }}
-          asset_path: texhigh-${{ matrix.target }}.zip
-          asset_name: texhigh-${{ matrix.target }}.zip
-          asset_content_type: application/zip
-
-      - name: Upload asset (Unix)
-        if: runner.os != 'Windows'
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ needs.create_release.outputs.upload_url }}
-          asset_path: texhigh-${{ matrix.target }}.tar.gz
-          asset_name: texhigh-${{ matrix.target }}.tar.gz
-          asset_content_type: application/gzip
+    - name: Upload to Release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: ${{ github.ref_name }}
+        files: texhigh-${{ matrix.target }}.${{ matrix.package_ext }}
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
