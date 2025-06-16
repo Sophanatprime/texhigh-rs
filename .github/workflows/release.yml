@@ -20,7 +20,7 @@ jobs:
             artifact_name: texhigh.exe
             package_ext: zip
             profile: release-windows
-          - target: x86_64-unknown-linux-gnu
+          - target: x86_64-unknown-linux-musl
             os: ubuntu-latest
             artifact_name: texhigh
             package_ext: tar.gz
@@ -40,10 +40,6 @@ jobs:
       with:
         toolchain: nightly
         targets: ${{ matrix.target }}
-
-    - name: Add Windows target (if needed)
-      if: matrix.os == 'windows-latest'
-      run: rustup target add ${{ matrix.target }}
 
     - name: Build project
       run: cargo build --profile ${{ matrix.profile }} --target ${{ matrix.target }} --verbose
