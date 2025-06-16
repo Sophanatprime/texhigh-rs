@@ -27,7 +27,7 @@ pub mod tokenlist;
 pub mod types;
 
 const FULL_VERSION: &str = env!("CARGO_PKG_VERSION");
-const DATE: &str = "2025/04/16";
+const DATE: &str = "2025/06/16";
 const COPYRIGHT: &str = "2024-2025, Wenjian Chern ©";
 
 pub fn get_matches() -> ArgMatches {
