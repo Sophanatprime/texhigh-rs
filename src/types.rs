@@ -511,7 +511,7 @@ impl CTab {
         CTab { chars, catcodes, escape: u32::MAX, endline: u32::MAX }
     }
     /// There is `iter`, no `iter_mut`.
-    pub fn iter(&self) -> CTabIter {
+    pub fn iter(&'_ self) -> CTabIter<'_> {
         CTabIter { next: 0, ctab: self }
     }
 }
@@ -670,7 +670,7 @@ impl CTabSet {
     }
 
     // Immutably borrow the ctabs[name].
-    pub fn get_by_name(&self, name: &str) -> Option<Ref<CTab>> {
+    pub fn get_by_name(&'_ self, name: &str) -> Option<Ref<'_, CTab>> {
         match self.ctabs.get(name) {
             Some(value) => Some(value.borrow()),
             None => None,
@@ -678,7 +678,7 @@ impl CTabSet {
     }
 
     // Mutably borrow the ctabs[name].
-    pub fn get_by_name_mut(&self, name: &str) -> Option<RefMut<CTab>> {
+    pub fn get_by_name_mut(&'_ self, name: &str) -> Option<RefMut<'_, CTab>> {
         match self.ctabs.get(name) {
             Some(value) => Some(value.borrow_mut()),
             None => None,
@@ -1789,23 +1789,23 @@ impl<'a> CatCodeStack<'a> {
         Self { data: vec![item.into()] }
     }
     pub fn push<T: Into<CatCodeStackItem<'a>>>(
-        &mut self,
+        &'_ mut self,
         item: T,
-    ) -> &CatCodeStackItem {
+    ) -> &'_ CatCodeStackItem<'_> {
         let index = self.len();
         self.data.push(item.into());
         unsafe { self.data.get_unchecked(index) }
     }
-    pub fn pop(&mut self) -> Option<CatCodeStackItem> {
+    pub fn pop(&'_ mut self) -> Option<CatCodeStackItem<'_>> {
         self.data.pop()
     }
-    pub fn remove(&mut self, index: usize) -> CatCodeStackItem {
+    pub fn remove(&'_ mut self, index: usize) -> CatCodeStackItem<'_> {
         self.data.remove(index)
     }
     pub fn remove_of(
-        &mut self,
+        &'_ mut self,
         item: &CatCodeStackItem,
-    ) -> Option<CatCodeStackItem> {
+    ) -> Option<CatCodeStackItem<'_>> {
         if self.len() > 0 {
             unsafe {
                 let item = item as *const CatCodeStackItem;

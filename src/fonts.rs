@@ -126,7 +126,7 @@ impl FontDatabase {
         Ok(dbs)
     }
 
-    pub fn to_database_ref(&self) -> FontDatabaseRef {
+    pub fn to_database_ref(&'_ self) -> FontDatabaseRef<'_, '_> {
         FontDatabaseRef {
             file: &self.file,
             link: self.link.to_vec_ref(),
@@ -684,10 +684,10 @@ impl<'a, 'b> FontDatabaseRef<'a, 'b> {
     pub fn file(&self) -> &Vec<FontFile> {
         self.file
     }
-    pub fn link(&self) -> &Vec<FontLinkRef> {
+    pub fn link(&self) -> &Vec<FontLinkRef<'_>> {
         &self.link
     }
-    pub fn fontset(&self) -> &Vec<FontSetRef> {
+    pub fn fontset(&self) -> &Vec<FontSetRef<'_>> {
         &self.fontset
     }
     pub fn file_count(&self) -> usize {
@@ -1826,7 +1826,7 @@ impl FontLinks {
             }
         }
     }
-    pub fn to_vec_ref(&self) -> Vec<FontLinkRef> {
+    pub fn to_vec_ref(&'_ self) -> Vec<FontLinkRef<'_>> {
         let mut res = vec![];
         match self {
             Self::Map(map) => {
@@ -1858,13 +1858,13 @@ impl FontLinks {
     }
 
     /// Get iterator of FontLinks, only if the inner data is Map.
-    pub fn iter_if_map(&self) -> Option<MapLinkIter> {
+    pub fn iter_if_map(&'_ self) -> Option<MapLinkIter<'_>> {
         match self {
             FontLinks::Map(map) => Some(MapLinkIter { link: map, index: 0 }),
             FontLinks::Vec(_) => None,
         }
     }
-    pub fn iter(&self) -> LinkIter {
+    pub fn iter(&'_ self) -> LinkIter<'_> {
         LinkIter { link: self, index: 0 }
     }
 

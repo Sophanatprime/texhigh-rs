@@ -888,7 +888,7 @@ impl BuilderStacks {
 }
 
 impl<'s> RegTExBuilder<'s> {
-    pub fn new(pattern: &str) -> RegTExBuilder {
+    pub fn new(pattern: &'_ str) -> RegTExBuilder<'_> {
         RegTExBuilder {
             pattern,
             offset: Cell::new(0),
