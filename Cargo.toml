@@ -54,6 +54,27 @@ winapi = { version = "*", features = ["winnls"] }
 [dev-dependencies]
 pest = "~2"
 pest_derive = "2"
+criterion = "*"
+
+[[bench]]
+name = "bench"
+harness = false
+
+[[bench]]
+name = "high"
+harness = false
+
+[[bench]]
+name = "regtex"
+harness = false
+
+[[bench]]
+name = "tex"
+harness = false
+
+[[bench]]
+name = "tl"
+harness = false
 
 [profile.release]
 panic = "abort"
