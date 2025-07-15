@@ -17,17 +17,17 @@ jobs:
         include:
           - target: x86_64-pc-windows-msvc
             os: windows-latest
-            artifact_name: texhigh.exe
+            bin_prefix: texhigh
             package_ext: zip
             profile: release-windows
           - target: x86_64-unknown-linux-musl
             os: ubuntu-latest
-            artifact_name: texhigh
+            bin_prefix: texhigh
             package_ext: tar.gz
             profile: release
           - target: x86_64-apple-darwin
             os: macos-latest
-            artifact_name: texhigh
+            bin_prefix: texhigh
             package_ext: tar.gz
             profile: release
 
@@ -57,34 +57,80 @@ jobs:
           ${{ matrix.target == 'x86_64-pc-windows-msvc' && '-C target-feature=+crt-static' || '' }}
           ${{ matrix.target == 'x86_64-unknown-linux-musl' && '-C link-arg=-s' || '' }}
 
-    - name: Create output directory
-      run: mkdir release-package
+    - name: Create binaries directory
+      run: mkdir release-binaries
 
-    - name: Prepare Windows artifacts
+    - name: Find and copy Windows binaries
       if: matrix.os == 'windows-latest'
+      shell: powershell
       run: |
-        Copy-Item "target\${{ matrix.target }}\${{ matrix.profile }}\${{ matrix.artifact_name }}" release-package/
-        7z a -tzip texhigh-${{ matrix.target }}.zip ./release-package/*
+        $binPath = "target\${{ matrix.target }}\${{ matrix.profile }}\"
+        $binFiles = Get-ChildItem -Path $binPath -Filter "${{ matrix.bin_prefix }}*.exe"
+        
+        if (-not $binFiles) {
+          Write-Error "No binaries found matching pattern: ${{ matrix.bin_prefix }}*.exe"
+          exit 1
+        }
+        
+        foreach ($file in $binFiles) {
+          Copy-Item $file.FullName -Destination "release-binaries\"
+          Write-Host "Copied: $($file.Name)"
+        }
 
-    - name: Prepare Linux musl artifacts
-      if: matrix.target == 'x86_64-unknown-linux-musl'
+    - name: Find and copy Unix binaries
+      if: matrix.os != 'windows-latest'
       run: |
-        cp "target/${{ matrix.target }}/${{ matrix.profile }}/${{ matrix.artifact_name }}" release-package/
-        chmod +x release-package/${{ matrix.artifact_name }}
-        tar czf texhigh-${{ matrix.target }}.tar.gz -C release-package .
+        cd "target/${{ matrix.target }}/${{ matrix.profile }}/"
+        for bin in ${{ matrix.bin_prefix }}*; do
+          if [ -f "$bin" ] && [ -x "$bin" ]; then
+            echo "Copying binary: $bin"
+            cp "$bin" ../../../../release-binaries/
+            chmod +x "../../../../release-binaries/$bin"
+          fi
+        done
+        cd ../../../..
 
-    - name: Prepare macOS artifacts
-      if: matrix.target == 'x86_64-apple-darwin'
+    - name: Verify binaries exist
       run: |
-        cp "target/${{ matrix.target }}/${{ matrix.profile }}/${{ matrix.artifact_name }}" release-package/
-        chmod +x release-package/${{ matrix.artifact_name }}
-        tar czf texhigh-${{ matrix.target }}.tar.gz -C release-package .
+        if [ "$(ls -A release-binaries)" ]; then
+          echo "Binaries found:"
+          ls -l release-binaries/
+        else
+          echo "ERROR: No binaries found in release-binaries directory!"
+          exit 1
+        fi
+
+    - name: Package individual binaries (Windows)
+      if: matrix.os == 'windows-latest'
+      shell: powershell
+      run: |
+        Set-Location release-binaries
+        Get-ChildItem -File | ForEach-Object {
+          $zipName = "$($_.BaseName)-${{ matrix.target }}.zip"
+          7z a -tzip $zipName $_.Name
+          Write-Host "Created package: $zipName"
+        }
+        Set-Location ..
+
+    - name: Package individual binaries (Unix)
+      if: matrix.os != 'windows-latest'
+      run: |
+        cd release-binaries
+        for bin in *; do
+          if [ -f "$bin" ]; then
+            pkg_name="$bin-${{ matrix.target }}.tar.gz"
+            tar czf "$pkg_name" "$bin"
+            echo "Created package: $pkg_name"
+          fi
+        done
+        cd ..
 
     - name: Upload to Release
       uses: softprops/action-gh-release@v1
       with:
         tag_name: ${{ github.ref_name }}
         files: |
-          texhigh-${{ matrix.target }}.${{ matrix.package_ext }}
+          release-binaries/*.zip
+          release-binaries/*.tar.gz
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
