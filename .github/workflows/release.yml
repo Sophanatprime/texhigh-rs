@@ -64,33 +64,34 @@ jobs:
       if: matrix.os == 'windows-latest'
       shell: powershell
       run: |
-        $binPath = "target\${{ matrix.target }}\${{ matrix.profile }}\"
+        $binPath = "$env:GITHUB_WORKSPACE/target/${{ matrix.target }}/${{ matrix.profile }}"
         $binFiles = Get-ChildItem -Path $binPath -Filter "${{ matrix.bin_prefix }}*.exe"
-        
+
         if (-not $binFiles) {
           Write-Error "No binaries found matching pattern: ${{ matrix.bin_prefix }}*.exe"
           exit 1
         }
         
         foreach ($file in $binFiles) {
-          Copy-Item $file.FullName -Destination "release-binaries\"
+          Copy-Item $file.FullName -Destination "$env:GITHUB_WORKSPACE/release-binaries/"
           Write-Host "Copied: $($file.Name)"
         }
 
     - name: Find and copy Unix binaries
       if: matrix.os != 'windows-latest'
+      shell: bash
       run: |
-        cd "target/${{ matrix.target }}/${{ matrix.profile }}/"
+        cd "$GITHUB_WORKSPACE/target/${{ matrix.target }}/${{ matrix.profile }}"
         for bin in ${{ matrix.bin_prefix }}*; do
           if [ -f "$bin" ] && [ -x "$bin" ]; then
             echo "Copying binary: $bin"
-            cp "$bin" ../../../../release-binaries/
-            chmod +x "../../../../release-binaries/$bin"
+            cp "$bin" "$GITHUB_WORKSPACE/release-binaries/"
+            chmod +x "$GITHUB_WORKSPACE/release-binaries/$bin"
           fi
         done
-        cd ../../../..
 
     - name: Verify binaries exist
+      shell: bash
       run: |
         if [ "$(ls -A release-binaries)" ]; then
           echo "Binaries found:"
@@ -104,16 +105,16 @@ jobs:
       if: matrix.os == 'windows-latest'
       shell: powershell
       run: |
-        Set-Location release-binaries
+        cd release-binaries
         Get-ChildItem -File | ForEach-Object {
           $zipName = "$($_.BaseName)-${{ matrix.target }}.zip"
           7z a -tzip $zipName $_.Name
           Write-Host "Created package: $zipName"
         }
-        Set-Location ..
 
     - name: Package individual binaries (Unix)
       if: matrix.os != 'windows-latest'
+      shell: bash
       run: |
         cd release-binaries
         for bin in *; do
@@ -123,7 +124,6 @@ jobs:
             echo "Created package: $pkg_name"
           fi
         done
-        cd ..
 
     - name: Upload to Release
       uses: softprops/action-gh-release@v1
