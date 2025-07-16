@@ -556,10 +556,9 @@ impl HighFormat for StandardFormatter<'_> {
         let mut fmt_s = String::new();
         loop {
             let token = if next_token.is_some() {
-                (next_token.unwrap(), {
-                    next_token = None;
-                })
-                    .0
+                let ret = next_token.unwrap();
+                next_token = None;
+                ret
             } else {
                 match tokenlist_iter.next() {
                     Some(t) => t,
