@@ -6,7 +6,8 @@ use std::{
     sync::Arc,
 };
 
-use crate::config::{HighConfig, Input};
+use crate::config::HighConfig;
+use crate::tex::{escape_string, escape_string_filter, escape_string_small};
 use crate::types::*;
 use crate::{get_cs_type, primitive_engine, LaTeXType};
 
@@ -170,12 +171,6 @@ pub trait HighFormat {
         } else {
             None
         }
-    }
-    fn get_range_category<'i, I: Into<Input<'i>>>(
-        &self,
-        _: &I,
-    ) -> Option<CompactString> {
-        None
     }
     fn get_char_replacement(&self, chr: char) -> CompactString {
         format_compact!("\\THcr{{{}}}", chr as u32)

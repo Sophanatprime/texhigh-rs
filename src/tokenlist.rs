@@ -9,10 +9,12 @@ use rayon::prelude::*;
 use crate::config::{Category, CategorySpan, HighConfig, LexerType};
 use crate::high::{HWrite, HighFormat};
 use crate::tex::circumflex_mechanism;
-use crate::tex::{get_cs_type_re, primitive_engine, LaTeXType};
+use crate::tex::{
+    escape_string, escape_string_filter, escape_string_small, get_cs_type_re,
+    primitive_engine, CatCode, LaTeXType,
+};
 use crate::types::{
-    escape_string, escape_string_filter, escape_string_small, CTabSet,
-    CatCode, CatCodeGetter, CatCodeStack, Character, ControlSequence,
+    CTabSet, CatCodeGetter, CatCodeStack, Character, ControlSequence,
     ErrorKind, Position, Token, TokenListBytes, TokenListBytesRef,
 };
 
@@ -426,8 +428,6 @@ impl<'a> SourcedFormatter<'a> {
                     None => break,
                 },
             };
-            let _range_name =
-                self.get_range_category(&self.tokenlist.as_ref());
 
             match token {
                 Token::Char(chr) if self.is_newline(chr) => {

@@ -14,10 +14,10 @@ use std::str::FromStr;
 use std::{fs, io};
 
 use crate::regtex::{RegTEx, RegTExSet};
+use crate::tex::CatCode;
 use crate::tokenlist::SourcedTokenList;
 use crate::types::{
-    CTabSet, CatCode, ErrorKind, Position, Token, TokenListBytes,
-    TokenListBytesRef,
+    CTabSet, ErrorKind, Position, Token, TokenListBytes, TokenListBytesRef,
 };
 
 #[derive(Debug, Clone)]

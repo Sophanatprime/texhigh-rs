@@ -4,8 +4,12 @@ use bitflags::bitflags;
 use lazy_static::lazy_static;
 use regex::RegexSet;
 
+pub mod args_parser;
 mod circumflex;
+mod types;
+
 pub use circumflex::circumflex_mechanism;
+pub use types::*;
 
 bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]

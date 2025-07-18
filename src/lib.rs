@@ -578,7 +578,7 @@ pub fn command_high(m: &ArgMatches) {
     };
     let keep_necessary = |s: String| -> String {
         if th_config.high_config.lines == [0, 0]
-            && (th_config.high_config.gobble.0 == 0 || !s.starts_with(' '))
+            && th_config.high_config.gobble.0 == 0
         {
             return s;
         }
