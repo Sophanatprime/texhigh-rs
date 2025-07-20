@@ -1,5 +1,3 @@
-#![allow(unused)]
-
 use bitflags::bitflags;
 use lazy_static::lazy_static;
 use regex::RegexSet;

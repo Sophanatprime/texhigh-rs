@@ -522,7 +522,6 @@ impl PartialEq for ControlSequence {
         self.get_csname() == other.get_csname()
     }
 }
-impl Eq for ControlSequence {}
 impl ControlSequence {
     /// Control Word.
     pub fn new_cwo<T: AsRef<str>>(s: T) -> Self {
@@ -556,6 +555,11 @@ impl ControlSequence {
     pub fn with_escaped_char(mut self, escape_char: char) -> Self {
         self.escape_char = Some(escape_char);
         self
+    }
+    /// Tag of a control sequence.
+    /// 0: control word, 1: control symbol, 2: control space.
+    pub fn tag(&self) -> u8 {
+        unsafe { *self.csname.as_bytes().get_unchecked(0) }
     }
     pub fn get_csname(&self) -> &str {
         unsafe { self.csname.get_unchecked(1 ..) }
@@ -738,7 +742,7 @@ pub fn escape_control(c: char, e: u8) -> CompactString {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Token {
     CS(ControlSequence),
     Char(Character),
@@ -1000,20 +1004,8 @@ impl TokenList {
         let s = source.as_ref().lines().collect::<Vec<_>>().join(&endline);
         TokenList::_parse(s.chars(), catcode)
     }
-    pub fn len(&self) -> usize {
-        self.values.len()
-    }
-    pub fn is_empty(&self) -> bool {
-        self.values.is_empty()
-    }
     pub fn push<T: Into<Token>>(&mut self, token: T) {
         self.values.push(token.into());
-    }
-    pub fn iter(&self) -> std::slice::Iter<'_, Token> {
-        self.values.iter()
-    }
-    pub fn iter_mut(&mut self) -> std::slice::IterMut<'_, Token> {
-        self.values.iter_mut()
     }
     /// Write tokenlist to stream, but do not process invisible and unprintable char.
     pub unsafe fn write<T: io::Write>(
@@ -1123,5 +1115,21 @@ impl IntoIterator for TokenList {
     type Item = Token;
     fn into_iter(self) -> Self::IntoIter {
         self.values.into_iter()
+    }
+}
+impl AsRef<[Token]> for TokenList {
+    fn as_ref(&self) -> &[Token] {
+        &self.values
+    }
+}
+impl std::ops::Deref for TokenList {
+    type Target = [Token];
+    fn deref(&self) -> &Self::Target {
+        &self.values
+    }
+}
+impl std::ops::DerefMut for TokenList {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.values
     }
 }

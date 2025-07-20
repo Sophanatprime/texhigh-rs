@@ -7,13 +7,13 @@ use crate::types::CatCodeGetter;
 /// Panic if `hhhh` or `hhhhhh` is not a valid Unicode scalar value.
 pub fn circumflex_mechanism<'c, C: CatCodeGetter>(
     catcode: &C,
-    mut chars: Chars<'c>,
-    mut chr: char,
+    chars: Chars<'c>,
+    chr: char,
 ) -> (char, usize) {
     if chr.is_ascii() {
         return circumflex_ascii(catcode, chars.as_str(), chr as u8);
     }
-    let mut advance = 0;
+    let advance = 0;
     //TODO: Allow non-ASCII value
     (chr, advance)
 }
@@ -30,8 +30,10 @@ enum CircumflexKind {
 fn circumflex_ascii<'c, C: CatCodeGetter>(
     catcode: &C,
     chars: &'c str,
-    mut chr: u8,
+    chr: u8,
 ) -> (char, usize) {
+    let _ = catcode;
+
     #[inline]
     fn is_cir_hex(v: u8) -> bool {
         matches!(v, b'0'..=b'9' | b'a'..=b'f')

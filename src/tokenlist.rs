@@ -159,6 +159,11 @@ impl SourcedTokenList {
         self.tl.iter().map(|v| v.to_string()).collect()
     }
 }
+impl AsRef<[Token]> for SourcedTokenList {
+    fn as_ref(&self) -> &[Token] {
+        self.tokenlist()
+    }
+}
 
 fn parse_tokenlist<'c, 'i: 'c, 'l: 'c + 'i>(
     tokenlist: &mut Vec<Token>,
