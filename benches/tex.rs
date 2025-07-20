@@ -1,6 +1,8 @@
 use criterion::{criterion_group, criterion_main, Criterion};
 use std::hint::black_box;
 
+use texhigh::tex::args_parser::*;
+use texhigh::types::*;
 use texhigh::LaTeXType;
 
 #[rustfmt::skip]
@@ -116,5 +118,78 @@ mod pest_cs_type {
     }
 }
 
-criterion_group!(tex, cs_name_regex, cs_name_pest);
+pub fn args_parse_spec(c: &mut Criterion) {
+    let ref catcode = CTab::document();
+    let spec = r##" s l m o O{long\relax argument}
+        r\left\right R(){required} u{^^M} g"##;
+    let spec = TokenList::parse(spec, catcode);
+
+    let mut group = c.benchmark_group("parse-spec");
+    group.sample_size(1_0000);
+    group.bench_function("args parse spec", |b| {
+        b.iter(|| {
+            black_box(ArgFinder::parse(&spec).unwrap());
+        })
+    });
+}
+
+pub fn args_find_normal(c: &mut Criterion) {
+    let ref catcode = CTab::latex3();
+    let grabber =
+        ArgSpec::m(ArgGroupStatus::default()).into_finder(false).unwrap();
+    let source = r##" {\scan_stop: \def\newpage{this is a newpage command}.
+        \tex_unskip:D \hskip 12bp plus 1bp minus 12bp}"##;
+    let source = TokenList::parse(source, catcode);
+    assert_eq!(grabber(&source, 0).unwrap(), Argument::Span(1, source.len()));
+
+    let mut group = c.benchmark_group("find-m-args");
+    group.sample_size(1_0000);
+    group.bench_function("args find normal", |b| {
+        b.iter(|| {
+            black_box(grabber(&source, 0).unwrap());
+        })
+    });
+}
+
+pub fn args_find_all(c: &mut Criterion) {
+    let ref catcode = CTab::document();
+    let spec = r##" s l m o O{long\relax argument}
+        r\left\right R(){required} u{^^M} g"##;
+    let spec = TokenList::parse(spec, catcode);
+    let finder = ArgFinder::parse(&spec).unwrap();
+    let source = r##"
+* {a mandatory\{ argument} [a [optional] argument]
+\left[\left(some braces\right)\right (the (required) (delimited) argument)^^M
+"##;
+    let source = TokenList::parse(source, catcode);
+
+    let result = finder.find_all(&source).unwrap();
+    assert_eq!(result.len(), 9);
+    assert_eq!(&result[0], &Argument::Present(1, 2));
+    assert_eq!(&result[1], &Argument::Span(2, 3));
+    assert_eq!(&result[2], &Argument::Span(3, 26));
+    assert_eq!(&result[3], &Argument::Present(27, 50));
+    assert_eq!(&result[4], &Argument::UnPresent(50));
+    assert_eq!(&result[5], &Argument::Span(51, 69));
+    assert_eq!(&result[6], &Argument::Span(70, 107));
+    assert_eq!(&result[7], &Argument::Span(107, 108));
+    assert_eq!(&result[8], &Argument::UnPresent(108));
+
+    let mut group = c.benchmark_group("find-args");
+    group.sample_size(1_0000);
+    group.bench_function("args find all", |b| {
+        b.iter(|| {
+            black_box(finder.find_all(&source).unwrap());
+        })
+    });
+}
+
+criterion_group!(
+    tex,
+    cs_name_regex,
+    cs_name_pest,
+    args_parse_spec,
+    args_find_normal,
+    args_find_all,
+);
 criterion_main!(tex);
