@@ -13,6 +13,7 @@ pub enum ErrorKind {
     MissingMandatoryArg(char),
     UncompletedArg(char),
     UnimplementedArgSpec(char),
+    UnexceptedEndGroupOrEof,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -26,9 +27,13 @@ pub enum Argument {
     /// `.1`: The end position of this argument.
     Present(usize, usize),
     /// Mandatory argument.
-    /// `.0`: The start position of this argument (may skip , given arg spec).
+    /// `.0`: The start position of this argument (may skip spaces, given arg spec).
     /// `.1`: The end position of this argument.
     Span(usize, usize),
+    /// Mandatory argument ended by some tokens (i.e., the delimiter).
+    /// `.0`: The position before the delimiter.
+    /// `.1`: The end position of this argument (after the delimiter).
+    Ending(usize, usize),
 }
 
 impl Argument {
@@ -37,6 +42,7 @@ impl Argument {
             Argument::UnPresent(last) => *last,
             Argument::Present(_, last) => *last,
             Argument::Span(_, last) => *last,
+            Argument::Ending(_, last) => *last,
         }
     }
 }
@@ -51,6 +57,10 @@ impl ArgFinder {
     pub fn new() -> Self {
         let state = Vec::new();
         ArgFinder { state }
+    }
+
+    pub fn len(&self) -> usize {
+        self.state.len()
     }
 
     pub fn push(&mut self, kind: ArgSpec) -> Result<&mut Self, ErrorKind> {
@@ -165,17 +175,21 @@ fn gen_arg_spec_finder(
     let kind = match spec_name {
         b'm' => ArgSpec::m(ArgGroupStatus::Optional),
         b'r' => {
-            let left = scan_one_token(token_iter, true, true)
-                .map_err(|_| invalid_spec.clone())?;
-            let right = scan_one_token(token_iter, true, true)
-                .map_err(|_| invalid_spec.clone())?;
+            let left =
+                scan_one_token(token_iter, ArgGroupStatus::Optional, true)
+                    .map_err(|_| invalid_spec.clone())?;
+            let right =
+                scan_one_token(token_iter, ArgGroupStatus::Optional, true)
+                    .map_err(|_| invalid_spec.clone())?;
             ArgSpec::r(left, right)
         }
         b'R' => {
-            let left = scan_one_token(token_iter, true, true)
-                .map_err(|_| invalid_spec.clone())?;
-            let right = scan_one_token(token_iter, true, true)
-                .map_err(|_| invalid_spec.clone())?;
+            let left =
+                scan_one_token(token_iter, ArgGroupStatus::Optional, true)
+                    .map_err(|_| invalid_spec.clone())?;
+            let right =
+                scan_one_token(token_iter, ArgGroupStatus::Optional, true)
+                    .map_err(|_| invalid_spec.clone())?;
             skip_one_arg(token_iter).map_err(|_| invalid_spec.clone())?;
             ArgSpec::R(left, right, ArgMissingValue::default())
         }
@@ -185,23 +199,27 @@ fn gen_arg_spec_finder(
             ArgSpec::O(ArgMissingValue::default())
         }
         b'd' => {
-            let left = scan_one_token(token_iter, true, true)
-                .map_err(|_| invalid_spec.clone())?;
-            let right = scan_one_token(token_iter, true, true)
-                .map_err(|_| invalid_spec.clone())?;
+            let left =
+                scan_one_token(token_iter, ArgGroupStatus::Optional, true)
+                    .map_err(|_| invalid_spec.clone())?;
+            let right =
+                scan_one_token(token_iter, ArgGroupStatus::Optional, true)
+                    .map_err(|_| invalid_spec.clone())?;
             ArgSpec::d(left, right)
         }
         b'D' => {
-            let left = scan_one_token(token_iter, true, true)
-                .map_err(|_| invalid_spec.clone())?;
-            let right = scan_one_token(token_iter, true, true)
-                .map_err(|_| invalid_spec.clone())?;
+            let left =
+                scan_one_token(token_iter, ArgGroupStatus::Optional, true)
+                    .map_err(|_| invalid_spec.clone())?;
+            let right =
+                scan_one_token(token_iter, ArgGroupStatus::Optional, true)
+                    .map_err(|_| invalid_spec.clone())?;
             skip_one_arg(token_iter).map_err(|_| invalid_spec.clone())?;
             ArgSpec::D(left, right, ArgMissingValue::default())
         }
         b's' => ArgSpec::s,
         b't' => {
-            let t = scan_one_token(token_iter, true, true)
+            let t = scan_one_token(token_iter, ArgGroupStatus::Optional, true)
                 .map_err(|_| invalid_spec.clone())?;
             ArgSpec::t(t)
         }
@@ -213,18 +231,51 @@ fn gen_arg_spec_finder(
             ArgSpec::G(ArgMissingValue::default())
         }
         b'u' => {
-            let t = scan_one_token(token_iter, true, false)
-                .map_err(|_| invalid_spec.clone())?;
+            let t =
+                scan_one_token(token_iter, ArgGroupStatus::Optional, false)
+                    .map_err(|_| invalid_spec.clone())?;
             ArgSpec::u(t)
         }
         b'U' => {
-            let t = scan_one_token(token_iter, true, false)
-                .map_err(|_| invalid_spec.clone())?;
+            let t =
+                scan_one_token(token_iter, ArgGroupStatus::Optional, false)
+                    .map_err(|_| invalid_spec.clone())?;
             skip_one_arg(token_iter).map_err(|_| invalid_spec.clone())?;
             ArgSpec::U(t, ArgMissingValue)
         }
         b'p' | b'P' | b'k' | b'T' | b'e' | b'E' | b'w' | b'W' => {
             return Err(ErrorKind::UnimplementedArgSpec(spec_name as char));
+        }
+        // a special spec: '\n'
+        b'\n' => {
+            let t = scan_one_token(token_iter, ArgGroupStatus::Optional, true)
+                .map_err(|_| invalid_spec.clone())?;
+            let balanced = match &t {
+                Token::CS(cs) => {
+                    if matches!(cs.get_csname(), "c_true_bool" | "BooleanTrue")
+                    {
+                        true
+                    } else if matches!(
+                        cs.get_csname(),
+                        "c_false_bool" | "BooleanFalse"
+                    ) {
+                        false
+                    } else {
+                        return Err(invalid_spec);
+                    }
+                }
+                Token::Any(_) => return Err(invalid_spec),
+                Token::Char(chr) => {
+                    if matches!(chr.charcode, '1' | 't') {
+                        true
+                    } else if matches!(chr.charcode, '0' | 'f') {
+                        false
+                    } else {
+                        return Err(invalid_spec);
+                    }
+                }
+            };
+            ArgSpec::Line(balanced)
         }
         _ => return Err(ErrorKind::UnsupportedArgSpec(spec_name as char)),
     };
@@ -365,7 +416,7 @@ where
 
 fn scan_one_token(
     token_iter: &mut std::slice::Iter<'_, Token>,
-    allow_groups: bool,
+    group: ArgGroupStatus,
     remove_spaces: bool,
 ) -> Result<Token, ()> {
     skip_if_char_iter(token_iter, |_, cat| {
@@ -380,12 +431,15 @@ fn scan_one_token(
             }
 
             if chr.catcode != CatCode::BeginGroup {
-                return Ok(token.clone());
+                if group == ArgGroupStatus::Disallowed {
+                    return Err(());
+                } else {
+                    return Ok(token.clone());
+                }
             }
 
             // type: {<token>}
-
-            if !allow_groups {
+            if group == ArgGroupStatus::Disallowed {
                 return Err(());
             }
 
@@ -434,7 +488,13 @@ fn scan_one_token(
             }
             Ok(token.clone())
         }
-        _ => Ok(token.clone()),
+        _ => {
+            if group == ArgGroupStatus::Required {
+                Err(())
+            } else {
+                Ok(token.clone())
+            }
+        }
     }
 }
 
@@ -491,6 +551,7 @@ pub enum ArgSpec {
     w(SmallVec<[(Token, Option<Token>); 4]>),
     W(SmallVec<[(Token, Option<Token>); 4]>, ArgMissingValue),
     */
+    Line(bool),
 }
 
 impl ArgSpec {
@@ -618,6 +679,7 @@ impl ArgSpec {
                 }
                 grabber_u(t, 'U')
             }
+            ArgSpec::Line(balanced) => grabber_current_line(balanced),
         };
         Ok(finder)
     }
@@ -635,10 +697,20 @@ pub fn grab_normal_argument<'t>(
     tl: &'t [Token],
     start: usize,
     group: ArgGroupStatus,
-) -> Result<&'t [Token], ErrorKind> {
+) -> Result<(&'t [Token], usize), ErrorKind> {
     let arg = grabber_m(group)(tl, start)?;
     let Argument::Span(l, r) = arg else { unreachable!() };
-    Ok(unsafe { tl.get_unchecked(l .. r) })
+    Ok((unsafe { tl.get_unchecked(l .. r) }, r))
+}
+
+pub fn grab_current_line<'t>(
+    tl: &'t [Token],
+    start: usize,
+    balanced: bool,
+) -> Result<(&'t [Token], usize), ErrorKind> {
+    let arg = grabber_current_line(balanced)(tl, start)?;
+    let Argument::Ending(s, e) = arg else { unreachable!() };
+    Ok((unsafe { tl.get_unchecked(start .. s) }, e))
 }
 
 fn grabber_m(group: ArgGroupStatus) -> Finder {
@@ -1009,16 +1081,58 @@ fn grabber_u(test: Token, spec_name: char) -> Finder {
                         .map_err(|_| ErrorKind::UncompletedArg(spec_name))?;
                 }
                 token @ _ => {
-                    index += 1;
                     if token == &test {
+                        let end = index;
+                        index += 1;
                         // need step index, we get: <tokens><test token>
-                        return Ok(Argument::Span(start, index));
+                        return Ok(Argument::Ending(end, index));
+                    } else {
+                        index += 1;
                     }
                 }
             }
         }
 
         Err(ErrorKind::UncompletedArg(spec_name))
+    };
+    Box::new(finder)
+}
+
+fn grabber_current_line(balanced: bool) -> Finder {
+    let finder = move |tl: &[Token],
+                       start: usize|
+          -> Result<Argument, ErrorKind> {
+        if start >= tl.len() {
+            return Ok(Argument::Ending(start, start));
+        }
+
+        let mut index = start;
+        while index < tl.len() {
+            match &tl[index] {
+                Token::Any(any) => {
+                    if *any == '\n' as u32 || *any == '\r' as u32 {
+                        return Ok(Argument::Ending(index, index + 1));
+                    } else {
+                        index += 1;
+                    }
+                }
+                Token::CS(_) => index += 1,
+                Token::Char(chr) => {
+                    if chr.catcode == CatCode::EndLine {
+                        return Ok(Argument::Ending(index, index + 1));
+                    } else if chr.catcode == CatCode::EndGroup && balanced {
+                        return Err(ErrorKind::UnexceptedEndGroupOrEof);
+                    } else if chr.catcode == CatCode::BeginGroup && balanced {
+                        index += 1;
+                        skip_to_end_group(tl, &mut index)
+                            .map_err(|_| ErrorKind::UnexceptedEndGroupOrEof)?;
+                    } else {
+                        index += 1;
+                    }
+                }
+            }
+        }
+        Ok(Argument::Ending(index, index))
     };
     Box::new(finder)
 }
@@ -1052,33 +1166,73 @@ mod tests {
         let tl = TokenList::parse(source, &catcode);
 
         assert_eq!(
-            scan_one_token(&mut tl[1 ..].iter(), true, false).unwrap(),
+            scan_one_token(
+                &mut tl[1 ..].iter(),
+                ArgGroupStatus::Optional,
+                false
+            )
+            .unwrap(),
             Token::new_char('*', CatCode::Other)
         );
         assert_eq!(
-            scan_one_token(&mut tl[4 ..].iter(), true, false).unwrap(),
+            scan_one_token(
+                &mut tl[4 ..].iter(),
+                ArgGroupStatus::Optional,
+                false
+            )
+            .unwrap(),
             Token::new_cs("l")
         );
         assert_eq!(
-            scan_one_token(&mut tl[8 ..].iter(), true, false).unwrap(),
+            scan_one_token(
+                &mut tl[8 ..].iter(),
+                ArgGroupStatus::Optional,
+                false
+            )
+            .unwrap(),
             Token::new_char(' ', CatCode::Space)
         );
-        assert!(scan_one_token(&mut tl[14 ..].iter(), true, false).is_err());
-        assert!(scan_one_token(&mut tl[20 ..].iter(), true, false).is_err());
-        assert!(scan_one_token(&mut tl[23 ..].iter(), true, false).is_err());
-        assert!(scan_one_token(&mut tl[27 ..].iter(), true, false).is_err());
-        assert!(scan_one_token(&mut tl[32 ..].iter(), true, false).is_err());
+        assert!(scan_one_token(
+            &mut tl[14 ..].iter(),
+            ArgGroupStatus::Optional,
+            false
+        )
+        .is_err());
+        assert!(scan_one_token(
+            &mut tl[20 ..].iter(),
+            ArgGroupStatus::Optional,
+            false
+        )
+        .is_err());
+        assert!(scan_one_token(
+            &mut tl[23 ..].iter(),
+            ArgGroupStatus::Optional,
+            false
+        )
+        .is_err());
+        assert!(scan_one_token(
+            &mut tl[27 ..].iter(),
+            ArgGroupStatus::Optional,
+            false
+        )
+        .is_err());
+        assert!(scan_one_token(
+            &mut tl[32 ..].iter(),
+            ArgGroupStatus::Optional,
+            false
+        )
+        .is_err());
     }
 
     #[test]
     fn test_grab_m() {
         let catcode = CTab::document();
         let spec = TokenList::parse(r"m m m", &catcode);
-        let finder = ArgFinder::parse(&spec.values).unwrap();
+        let finder = ArgFinder::parse(&spec).unwrap();
 
         let source = r##" a{ \relax a} {\iffalse}\fi"##;
         let source = TokenList::parse(source, &catcode);
-        let args = finder.find_all(&source.values).unwrap();
+        let args = finder.find_all(&source).unwrap();
         assert_eq!(args.len(), 3);
         assert_eq!(&args[0], &Argument::Span(1, 2));
         assert_eq!(&args[1], &Argument::Span(2, 8));
@@ -1087,7 +1241,7 @@ mod tests {
         assert_eq!(
             grab_normal_argument(&source, 0, ArgGroupStatus::Optional)
                 .unwrap(),
-            &source[1 .. 2]
+            (&source[1 .. 2], 2)
         );
         assert_eq!(
             grab_normal_argument(&source, 0, ArgGroupStatus::Required),
@@ -1096,17 +1250,17 @@ mod tests {
         assert_eq!(
             grab_normal_argument(&source, 0, ArgGroupStatus::Disallowed)
                 .unwrap(),
-            &source[1 .. 2]
+            (&source[1 .. 2], 2)
         );
         assert_eq!(
             grab_normal_argument(&source, 2, ArgGroupStatus::Optional)
                 .unwrap(),
-            &source[2 .. 8]
+            (&source[2 .. 8], 8)
         );
         assert_eq!(
             grab_normal_argument(&source, 2, ArgGroupStatus::Required)
                 .unwrap(),
-            &source[2 .. 8]
+            (&source[2 .. 8], 8)
         );
         assert_eq!(
             grab_normal_argument(&source, 2, ArgGroupStatus::Disallowed),
@@ -1117,12 +1271,12 @@ mod tests {
         assert_eq!(
             grab_normal_argument(&source, 8, ArgGroupStatus::Optional)
                 .unwrap(),
-            &source[9 .. 12]
+            (&source[9 .. 12], 12)
         );
         assert_eq!(
             grab_normal_argument(&source, 8, ArgGroupStatus::Required)
                 .unwrap(),
-            &source[9 .. 12]
+            (&source[9 .. 12], 12)
         );
         assert_eq!(
             grab_normal_argument(&source, 8, ArgGroupStatus::Disallowed),
@@ -1133,11 +1287,11 @@ mod tests {
 
         let source = r##"a \bgroup }"##;
         let source = TokenList::parse(source, &catcode);
-        assert!(finder.find_all(&source.values).is_err());
+        assert!(finder.find_all(&source).is_err());
 
         let source = r##"a {~}"##;
         let source = TokenList::parse(source, &catcode);
-        assert!(finder.find_all(&source.values).is_err());
+        assert!(finder.find_all(&source).is_err());
     }
 
     #[test]
@@ -1145,11 +1299,11 @@ mod tests {
         let catcode = CTab::document();
 
         let spec = TokenList::parse(r#"o r() D{ \l }{ \r }{NN} s"#, &catcode);
-        let finder = ArgFinder::parse(&spec.values).unwrap();
+        let finder = ArgFinder::parse(&spec).unwrap();
 
         let source = r##"[a[b]] ({(a}) \l aa \l\r\r"##;
         let source = TokenList::parse(source, &catcode);
-        let args = finder.find_all(&source.values).unwrap();
+        let args = finder.find_all(&source).unwrap();
         assert_eq!(&args[0], &Argument::Present(0, 6));
         assert_eq!(&args[1], &Argument::Span(7, 13));
         assert_eq!(&args[2], &Argument::Present(14, 22));
@@ -1162,19 +1316,19 @@ mod tests {
 
         let source = TokenList::parse(r"[a]\l()\r", &catcode);
         assert_eq!(
-            finder.find_all(&source.values),
+            finder.find_all(&source),
             Err(ErrorKind::MissingMandatoryArg('r'))
         );
 
         let source = TokenList::parse(r"[a](\)", &catcode);
         assert_eq!(
-            finder.find_all(&source.values),
+            finder.find_all(&source),
             Err(ErrorKind::UncompletedArg('r'))
         );
 
         let source = TokenList::parse(r"[a]()\l\l..\r", &catcode);
         assert_eq!(
-            finder.find_all(&source.values),
+            finder.find_all(&source),
             Err(ErrorKind::UncompletedArg('D'))
         );
     }
@@ -1184,10 +1338,10 @@ mod tests {
         let catcode = CTab::document();
 
         let spec = TokenList::parse(r#"t* !s t\relax t&"#, &catcode);
-        let finder = ArgFinder::parse(&spec.values).unwrap();
+        let finder = ArgFinder::parse(&spec).unwrap();
         let source = r##" * \relax & *"##;
         let source = TokenList::parse(source, &catcode);
-        let args = finder.find_all(&source.values).unwrap();
+        let args = finder.find_all(&source).unwrap();
         assert_eq!(&args[0], &Argument::Present(1, 2));
         assert_eq!(&args[1], &Argument::UnPresent(2));
         assert_eq!(&args[2], &Argument::Present(3, 4));
@@ -1199,23 +1353,23 @@ mod tests {
         let catcode = CTab::document();
 
         let spec = TokenList::parse(r"v v", &catcode);
-        let finder = ArgFinder::parse(&spec.values).unwrap();
+        let finder = ArgFinder::parse(&spec).unwrap();
 
         let source = r##"|ab{\}\| {\{}\} |"##;
         let source = TokenList::parse(source, &catcode);
-        let args = finder.find_all(&source.values).unwrap();
+        let args = finder.find_all(&source).unwrap();
         assert_eq!(&args[0], &Argument::Span(0, 6));
         assert_eq!(&args[1], &Argument::Span(7, 11));
 
         let source = TokenList::parse(r"|ab{}| {{} |", &catcode);
         assert_eq!(
-            finder.find_all(&source.values),
+            finder.find_all(&source),
             Err(ErrorKind::UncompletedArg('v'))
         );
 
         let source = TokenList::parse(r"|ab{} {{} |", &catcode);
         assert_eq!(
-            finder.find_all(&source.values),
+            finder.find_all(&source),
             Err(ErrorKind::MissingMandatoryArg('v'))
         );
     }
@@ -1226,11 +1380,11 @@ mod tests {
         catcode.emplace_item('(', CatCode::BeginGroup);
 
         let spec = TokenList::parse(r"l m o l", &catcode);
-        let finder = ArgFinder::parse(&spec.values).unwrap();
+        let finder = ArgFinder::parse(&spec).unwrap();
 
         let source = r##" [dad\{ {[} [aa] ] {"##;
         let source = TokenList::parse(source, &catcode);
-        let args = finder.find_all(&source.values).unwrap();
+        let args = finder.find_all(&source).unwrap();
         assert_eq!(&args[0], &Argument::Span(0, 7));
         assert_eq!(&args[1], &Argument::Span(7, 10));
         assert_eq!(&args[2], &Argument::Present(11, 15));
@@ -1238,19 +1392,19 @@ mod tests {
 
         let source = TokenList::parse(r"[dad {[} [{}] ", &catcode);
         assert_eq!(
-            finder.find_all(&source.values),
+            finder.find_all(&source),
             Err(ErrorKind::UncompletedArg('l'))
         );
 
         let source = TokenList::parse(r"[dad {[} [{}]", &catcode);
         assert_eq!(
-            finder.find_all(&source.values),
+            finder.find_all(&source),
             Err(ErrorKind::MissingMandatoryArg('l'))
         );
 
         let source = TokenList::parse(r"[dad {[} [{}] (", &catcode);
         assert_eq!(
-            finder.find_all(&source.values),
+            finder.find_all(&source),
             Err(ErrorKind::UncompletedArg('l'))
         );
     }
@@ -1260,18 +1414,18 @@ mod tests {
         let catcode = CTab::document();
 
         let spec = TokenList::parse(r"m g G{}", &catcode);
-        let finder = ArgFinder::parse(&spec.values).unwrap();
+        let finder = ArgFinder::parse(&spec).unwrap();
 
         let source = r##" m {\{} \relax {!}"##;
         let source = TokenList::parse(source, &catcode);
-        let args = finder.find_all(&source.values).unwrap();
+        let args = finder.find_all(&source).unwrap();
         assert_eq!(&args[0], &Argument::Span(1, 2));
         assert_eq!(&args[1], &Argument::Present(3, 6));
         assert_eq!(&args[2], &Argument::UnPresent(8));
 
         let source = TokenList::parse(r"m {\} .", &catcode);
         assert_eq!(
-            finder.find_all(&source.values),
+            finder.find_all(&source),
             Err(ErrorKind::UncompletedArg('g'))
         );
     }
@@ -1281,34 +1435,65 @@ mod tests {
         let catcode = CTab::document();
 
         let spec = TokenList::parse(r"u\right U\#{##} s", &catcode);
-        let finder = ArgFinder::parse(&spec.values).unwrap();
+        let finder = ArgFinder::parse(&spec).unwrap();
 
         let source = r##"aa{\right a#1}\{ \right ##\#"##;
         let source = TokenList::parse(source, &catcode);
-        let args = finder.find_all(&source.values).unwrap();
-        assert_eq!(&args[0], &Argument::Span(0, 12));
-        assert_eq!(&args[1], &Argument::Span(12, 16));
+        let args = finder.find_all(&source).unwrap();
+        assert_eq!(&args[0], &Argument::Ending(11, 12));
+        assert_eq!(&args[1], &Argument::Ending(15, 16));
 
         let source = TokenList::parse(r##"u{\right}"##, &catcode);
         assert_eq!(
-            finder.find_all(&source.values),
+            finder.find_all(&source),
             Err(ErrorKind::UncompletedArg('u'))
         );
 
         let source = TokenList::parse(r##""##, &catcode);
         assert_eq!(
-            finder.find_all(&source.values),
+            finder.find_all(&source),
             Err(ErrorKind::MissingMandatoryArg('u'))
         );
 
         let spec = TokenList::parse(r"u{^^M} u{^^M} u{^^J}", &catcode);
-        let finder = ArgFinder::parse(&spec.values).unwrap();
+        let finder = ArgFinder::parse(&spec).unwrap();
         let source = "abc\\relax\r\n a\rb^^M^^J";
         let source = TokenList::parse(source, &catcode);
         assert_eq!(source.len(), 11);
-        let args = finder.find_all(&source.values).unwrap();
-        assert_eq!(&args[0], &Argument::Span(0, 5));
-        assert_eq!(&args[1], &Argument::Span(5, 8));
-        assert_eq!(&args[2], &Argument::Span(8, 11));
+        let args = finder.find_all(&source).unwrap();
+        assert_eq!(&args[0], &Argument::Ending(4, 5));
+        assert_eq!(&args[1], &Argument::Ending(7, 8));
+        assert_eq!(&args[2], &Argument::Ending(10, 11));
+    }
+
+    #[test]
+    fn test_grab_curr_line() {
+        let catcode = CTab::document();
+
+        let spec =
+            TokenList::parse(r"^^M ^^J{t} ^^J{\BooleanFalse } ^^M", &catcode);
+        let finder = ArgFinder::parse(&spec).unwrap();
+
+        let source = r##"^^M \iffalse{\def"##;
+        let source = TokenList::parse(source, &catcode);
+        let args = finder.find_all(&source).unwrap();
+        assert_eq!(&args[0], &Argument::Ending(0, 1));
+        assert_eq!(&args[1], &Argument::Ending(5, 5));
+
+        let source = TokenList::parse(r"{\def}^^M \iffasle{\fi}^^M", &catcode);
+        let args = finder.find_all(&source).unwrap();
+        assert_eq!(&args[0], &Argument::Ending(3, 4));
+        assert_eq!(&args[1], &Argument::Ending(9, 10));
+
+        let source = TokenList::parse(r"{\def^^M \iffasle\{\fi}^^M", &catcode);
+        let args = finder.find_all(&source).unwrap();
+        assert_eq!(&args[0], &Argument::Ending(8, 9));
+        assert_eq!(&args[1], &Argument::Ending(9, 9));
+
+        let source = TokenList::parse(r"{\def^^M\}\fi^^M", &catcode);
+        assert_eq!(
+            finder.find_all(&source),
+            Err(ErrorKind::UnexceptedEndGroupOrEof)
+        );
     }
 }
