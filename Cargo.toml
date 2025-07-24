@@ -11,7 +11,7 @@ bitflags = "2"
 byte-unit = "*"
 clap = "~4"
 compact_str = { version = "*", features = ["serde"] }
-config = "~0"
+config = "^0.15"
 cosmic-text = "*"
 dirs = "*"
 encoding_rs = "*"
@@ -36,7 +36,7 @@ smallvec = { version = "1", features = ["serde", "write", "union", "const_generi
 sys-locale = "*"
 textwrap = { version = "*", features = ["terminal_size"] }
 tiny-skia = "*"
-toml = "^0.8"
+toml = "^0.9"
 unicode-linebreak = "*"
 unicode-normalization = "*"
 unicode-properties = { version = "*", features = ["general-category", "emoji"] }
