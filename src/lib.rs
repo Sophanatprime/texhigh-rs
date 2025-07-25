@@ -745,6 +745,7 @@ fn get_thconfig(m: &ArgMatches) -> THConfig {
         CTabSet::from_str(include_str!("prelude-ctabset.thcs")).unwrap(),
     );
     th_config.high_config = get_highconfig(m);
+    th_config.high_config.reorganize();
     trace!("{:?}", &th_config.high_config);
 
     let mut ctab_list: Vec<(usize, CTabSet)> = vec![];

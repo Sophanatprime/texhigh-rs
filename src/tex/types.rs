@@ -556,6 +556,9 @@ impl ControlSequence {
         self.escape_char = Some(escape_char);
         self
     }
+    pub fn len(&self) -> usize {
+        self.get_csname().len()
+    }
     /// Tag of a control sequence.
     /// 0: control word, 1: control symbol, 2: control space.
     pub fn tag(&self) -> u8 {
@@ -809,6 +812,29 @@ impl Token {
                 }
             }
             Token::Any(any) => format_compact!("<{:08x}>", *any),
+        }
+    }
+
+    pub fn detokenize(&self) -> CompactString {
+        match self {
+            Token::Char(c) => c.escape_control(b'^'),
+            Token::CS(cs) => {
+                format_compact!(
+                    "{}{}{}",
+                    '\\',
+                    cs.get_csname_escaped(b'^'),
+                    if cs.tag() == 0 { " " } else { "" }
+                )
+            }
+            Token::Any(any) => {
+                if *any == ('\r' as u32) || *any == ('\n' as u32) {
+                    format_compact!("{}", unsafe {
+                        char::from_u32_unchecked(*any)
+                    })
+                } else {
+                    CompactString::const_new("")
+                }
+            }
         }
     }
 

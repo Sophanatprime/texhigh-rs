@@ -42,6 +42,7 @@ pub enum ErrorKind {
     FormatError,
     RegexError,
     RegTExError,
+    HighRangeError,
 }
 impl fmt::Display for ErrorKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -1521,6 +1522,14 @@ pub(crate) enum TokenType {
     Any,
 }
 pub struct TokenBytes(pub(crate) SmallVec<[u8; 24]>);
+impl TokenBytes {
+    pub fn tokens_len(&self) -> usize {
+        unsafe { Self::tokens_len_unchecked(&self) }
+    }
+    pub unsafe fn tokens_len_unchecked(bytes: &[u8]) -> usize {
+        bytes.iter().filter(|&&v| v == 0xFF).count()
+    }
+}
 impl Deref for TokenBytes {
     type Target = SmallVec<[u8; 24]>;
     fn deref(&self) -> &Self::Target {

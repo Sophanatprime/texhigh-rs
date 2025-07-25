@@ -6,8 +6,11 @@ use compact_str::{format_compact, CompactString, ToCompactString};
 use log::warn;
 use rayon::prelude::*;
 
-use crate::config::{Category, CategorySpan, HighConfig, LexerType};
+use crate::config::{
+    Category, CategorySpan, HighConfig, LexerType, RangeComments,
+};
 use crate::high::{HWrite, HighFormat};
+use crate::tex::args_parser::Argument;
 use crate::tex::circumflex_mechanism;
 use crate::tex::{
     escape_string, escape_string_filter, escape_string_small, get_cs_type_re,
@@ -15,7 +18,7 @@ use crate::tex::{
 };
 use crate::types::{
     CTabSet, CatCodeGetter, CatCodeStack, Character, ControlSequence,
-    ErrorKind, Position, Token, TokenListBytes, TokenListBytesRef,
+    ErrorKind, Position, Token, TokenBytes, TokenListBytes, TokenListBytesRef,
 };
 
 #[derive(Debug)]
@@ -117,13 +120,13 @@ impl SourcedTokenList {
         self.tokenlist().get(span)
     }
     pub fn source_get(&self, span: impl CategorySpan) -> Option<&str> {
-        let s = &self.source_indices()[span];
+        let s = self.source_indices().get(span)?;
         if s.is_empty() {
-            return None;
+            return Some("");
         }
         if s.last() == self.source_indices.last() {
             if s.len() == 1 {
-                return None;
+                return Some("");
             }
             self.source.get(s[0] .. s[s.len() - 1])
         } else {
@@ -135,13 +138,13 @@ impl SourcedTokenList {
         }
     }
     pub fn bytes_get(&self, span: impl CategorySpan) -> Option<&[u8]> {
-        let s = &self.bytes_indices()[span];
+        let s = self.bytes_indices().get(span)?;
         if s.is_empty() {
-            return None;
+            return Some(&[]);
         }
         if s.last() == self.bytes_indices.last() {
             if s.len() == 1 {
-                return None;
+                return Some(&[]);
             }
             self.bytes.get(s[0] .. s[s.len() - 1])
         } else {
@@ -408,9 +411,28 @@ pub struct SourcedFormatter<'a> {
     tokenlist: Arc<SourcedTokenList>,
     group_level: Cell<isize>,
     index: Cell<usize>, // index <= tokenlist.tokenlist().len()
-    #[allow(dead_code)]
-    range: Cell<usize>, //TODO: detect ranges, i.e. arguments of macros
+    range: Cell<Option<(&'a str, RangeKind)>>,
+    in_comment: Cell<bool>,
 }
+
+#[derive(Debug, Clone, Copy)]
+struct RangeKind {
+    start: usize,
+    end: usize,
+    inner: RangeInnerKind,
+}
+#[derive(Debug, Clone, Copy)]
+enum RangeInnerKind {
+    NoneArg { range_start: usize, high: bool },
+    OneArg { range_start: usize, arg_start: usize, arg_end: usize, high: bool },
+    Escape { range_start: usize, arg_start: usize },
+    // len <= 9, index <= 9
+    // step[0]: arg_start_pos - start
+    // step[i] (i>0): end of arg_i - arg_start_pos, end of arg_9 = end
+    // spec: arg spec name, ascii letter
+    Normal { len: u8, index: u8, step: [u32; 9], spec: [u8; 9] },
+}
+
 impl<'a> SourcedFormatter<'a> {
     pub fn format_now<T: HWrite>(
         &self,
@@ -425,13 +447,22 @@ impl<'a> SourcedFormatter<'a> {
                     next_token = None;
                     token
                 }
-                None => match tokenlist_iter.next() {
-                    Some(token) => {
-                        self.index.set(self.index.get() + 1);
-                        token
+                None => {
+                    self.detect_range();
+                    let n = self.write_range(stream)?;
+                    if n > 0 {
+                        self.index.set(self.index.get() + n);
+                        tokenlist_iter.advance_by(n).unwrap();
+                        continue;
                     }
-                    None => break,
-                },
+                    match tokenlist_iter.next() {
+                        Some(token) => {
+                            self.index.set(self.index.get() + 1);
+                            token
+                        }
+                        None => break,
+                    }
+                }
             };
 
             match token {
@@ -495,36 +526,7 @@ impl<'a> SourcedFormatter<'a> {
                     }
                 }
                 Token::Char(chr) if chr.catcode == CatCode::Parameter => {
-                    match tokenlist_iter.next() {
-                        Some(nt) => match nt {
-                            Token::Char(nc)
-                                if nc.catcode == CatCode::Parameter
-                                    || (nc.catcode == CatCode::Other
-                                        && nc.charcode.is_ascii_digit()) =>
-                            {
-                                self.fmt_raw(
-                                    stream,
-                                    format_args!("\\THrs{{{}}}", "parameter"),
-                                )?;
-                                self.fmt_chr(stream, chr)?;
-                                self.index.set(self.index.get() + 1);
-                                self.fmt_chr(stream, nc)?;
-                                self.fmt_raw(
-                                    stream,
-                                    format_args!("\\THre{{{}}}", "parameter"),
-                                )?;
-                            }
-                            _ => {
-                                self.fmt_chr(stream, chr)?;
-                                self.index.set(self.index.get() + 1);
-                                next_token = Some(nt);
-                            }
-                        },
-                        None => {
-                            self.fmt_chr(stream, chr)?;
-                            break;
-                        }
-                    }
+                    self.write_parameter(&mut tokenlist_iter, stream, chr)?;
                 }
                 _ => {
                     self.fmt_token(stream, token)?;
@@ -542,7 +544,520 @@ impl<'a> SourcedFormatter<'a> {
             tokenlist,
             group_level: Cell::new(0),
             index: Cell::new(0),
-            range: Cell::new(0),
+            range: Cell::new(None),
+            in_comment: Cell::new(false),
+        }
+    }
+    fn detect_range(&self) -> Option<usize> {
+        use crate::config::{Category, RangeItem};
+
+        // current token position
+        let curr_pos = self.index.get(); // end <= tl.len()
+                                         // the position after rangeitem.start
+                                         // let arg_pos = curr_pos; // defined later
+
+        let ranges = &self.high_config.ranges;
+        let tl = self.tokenlist.tokenlist();
+
+        if self.range.get().is_some()
+            || ranges.is_empty()
+            || curr_pos > tl.len()
+        {
+            return None;
+        }
+
+        // find the argument position (ie, position after the start)
+        // given source: % \startmacro{.}[.](.),
+        // the tl: ('%', 14)(' ', 10)("startmacro")('{', 1)('.', 10)('}', 2)...
+        // if str or re match '% \start', the arg pos is after \startmacro, it cannot break cs
+        // if regtex match '%\ \c{startmacro}', the arg pos is after \startmacro
+        //
+        // use captures to skip unnecessary tokens??
+        let is_comment = self.in_comment.get();
+        let (arg_pos, key, item) = ranges.iter().find_map(|(k, r)| {
+            let (start, in_comments) = match r {
+                RangeItem::Escape { start, in_comments, .. } => (start, in_comments),
+                RangeItem::Normal { start, in_comments, .. } => (start, in_comments),
+            };
+
+            if (is_comment && *in_comments == RangeComments::Forbidden)
+                ||(!is_comment && *in_comments == RangeComments::Required) {
+                return None;
+            }
+
+            let arg_pos = match start {
+                Category::Any => curr_pos,
+                Category::None => return None,
+                Category::Span(_) => return None,
+                Category::String(s) => {
+                    let source =
+                        self.tokenlist.source_get(curr_pos ..).unwrap();
+                    if !source.starts_with(s) {
+                        return None;
+                    }
+                    let source_end =
+                        self.tokenlist.source_indices()[curr_pos] + s.len();
+                    let arg_pos = match self
+                        .tokenlist
+                        .source_indices()
+                        .binary_search(&source_end)
+                    {
+                        Ok(count) => count,
+                        Err(count) => count,
+                    };
+                    arg_pos
+                }
+                Category::Regex(re) => {
+                    let source =
+                        self.tokenlist.source_get(curr_pos ..).unwrap();
+                    let source_end =
+                        self.tokenlist.source_indices()[curr_pos] + re.find(source)?.end();
+                    let arg_pos = match self
+                        .tokenlist
+                        .source_indices()
+                        .binary_search(&source_end)
+                    {
+                        Ok(count) => count,
+                        Err(count) => count,
+                    };
+                    arg_pos
+                }
+                Category::RegTEx(re) => {
+                    let bytes = self.tokenlist.bytes_get(curr_pos ..).unwrap();
+                    let token_counts = unsafe {
+                        let end = re.find_bytes(bytes)?.end();
+                        TokenBytes::tokens_len_unchecked(&bytes[.. end])
+                    };
+                    curr_pos + token_counts
+                }
+            };
+            log::trace!(
+                "Found range: {{ start_pos: {}, arg_pos: {}, key: {:?}, item: {:?} }}",
+                curr_pos, arg_pos, k, r
+            );
+            Some((arg_pos, k, r))
+        })?;
+
+        // curr_pos <= arg_pos <= tl.len
+        assert!(arg_pos <= tl.len());
+        let args_tl = unsafe { tl.get_unchecked(arg_pos ..) };
+
+        let mut end = arg_pos;
+        let range_inner = match item {
+            RangeItem::Escape {
+                start: _,
+                arguments,
+                remove_start,
+                use_argument,
+                insert_ending,
+                in_comments: _,
+            } => {
+                let args = match arguments.find_all(args_tl) {
+                    Ok(args) => args,
+                    Err(e) => {
+                        log::warn!(
+                            "I cannot parse arguments cause: {:?}, at: {}, source: {:?}",
+                            e, arg_pos,
+                            self.tokenlist
+                                .source_get(curr_pos..).unwrap_or_default()
+                                .chars().take(40).collect::<String>()
+                        );
+                        return None;
+                    }
+                };
+                if args.len() == 0 {
+                    let range_start =
+                        if *remove_start { arg_pos } else { curr_pos };
+                    RangeInnerKind::NoneArg { range_start, high: false }
+                } else if args.len() == 1 {
+                    let the_arg = &args[0];
+                    let the_spec_name =
+                        *unsafe { arguments.spec_names().get_unchecked(0) };
+
+                    end = arg_pos + the_arg.end();
+
+                    let (arg_start, arg_end) = if *remove_start
+                        && *use_argument
+                    {
+                        match the_arg {
+                            &Argument::UnPresent(e_step) => {
+                                (arg_pos + e_step, arg_pos + e_step)
+                            }
+                            &Argument::Present(s_step, e_step) => {
+                                match the_spec_name {
+                                    b'o' | b'O' | b'd' | b'D' | b'g'
+                                    | b'G' => (
+                                        arg_pos + s_step + 1,
+                                        arg_pos + e_step - 1,
+                                    ),
+                                    b's' | b't' | _ => {
+                                        (arg_pos + s_step, arg_pos + e_step)
+                                    }
+                                }
+                            }
+                            &Argument::Span(s_step, e_step) => {
+                                match the_spec_name {
+                                    b'm' => {
+                                        if e_step - 1 == s_step {
+                                            (
+                                                arg_pos + s_step,
+                                                arg_pos + e_step,
+                                            )
+                                        } else {
+                                            (
+                                                arg_pos + s_step + 1,
+                                                arg_pos + e_step - 1,
+                                            )
+                                        }
+                                    }
+                                    b'r' | b'R' | b'v' => (
+                                        arg_pos + s_step + 1,
+                                        arg_pos + e_step - 1,
+                                    ),
+                                    b'l' | _ => {
+                                        (arg_pos + s_step, arg_pos + e_step)
+                                    }
+                                }
+                            }
+                            &Argument::Ending(arg_e_step, e_step) => {
+                                match the_spec_name {
+                                    b'u' | b'U' | b'\n' | _ => {
+                                        if *insert_ending {
+                                            end -= e_step - arg_e_step;
+                                        }
+                                        (arg_pos, arg_pos + arg_e_step)
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        match the_arg {
+                            &Argument::UnPresent(e_step) => {
+                                (arg_pos + e_step, arg_pos + e_step)
+                            }
+                            &Argument::Present(s_step, e_step) => {
+                                (arg_pos + s_step, arg_pos + e_step)
+                            }
+                            &Argument::Span(s_step, e_step) => {
+                                (arg_pos + s_step, arg_pos + e_step)
+                            }
+                            &Argument::Ending(_, e_step) => {
+                                (arg_pos, arg_pos + e_step)
+                            }
+                        }
+                    };
+                    let range_start = if *remove_start {
+                        if *use_argument {
+                            arg_start
+                        } else {
+                            arg_pos
+                        }
+                    } else {
+                        curr_pos
+                    };
+                    RangeInnerKind::OneArg {
+                        range_start,
+                        arg_start,
+                        arg_end,
+                        high: false,
+                    }
+                } else {
+                    let last_arg =
+                        unsafe { args.get_unchecked(args.len() - 1) };
+                    end = arg_pos + last_arg.end();
+                    if *insert_ending {
+                        match last_arg {
+                            Argument::Ending(arg_e_step, e_step) => {
+                                end -= e_step - arg_e_step;
+                            }
+                            _ => {}
+                        }
+                    }
+                    let range_start =
+                        if *remove_start { arg_pos } else { curr_pos };
+                    RangeInnerKind::Escape { range_start, arg_start: arg_pos }
+                }
+            }
+            RangeItem::Normal {
+                start: _,
+                arguments,
+                insert_ending,
+                in_comments: _,
+            } => {
+                let args = match arguments.find_all(args_tl) {
+                    Ok(args) => args,
+                    Err(e) => {
+                        log::warn!(
+                            "I cannot parse arguments cause: {:?}, at: {}, source: {:?}",
+                            e, arg_pos,
+                            self.tokenlist
+                                .source_get(curr_pos..).unwrap_or_default()
+                                .chars().take(40).collect::<String>()
+                        );
+                        return None;
+                    }
+                };
+                assert!(args.len() <= 9);
+                assert_eq!(arguments.spec_names().len(), args.len());
+                let len = args.len() as u8;
+
+                let mut spec = [0; 9];
+                spec[.. args.len()]
+                    .copy_from_slice(&arguments.spec_names()[..]);
+
+                let mut step = [0; 9];
+                step[0] = (arg_pos - curr_pos) as u32;
+                if args.len() == 0 {
+                    end = arg_pos;
+                } else {
+                    std::iter::zip(
+                        step.iter_mut().skip(1),
+                        args[.. args.len() - 1].iter(),
+                    )
+                    .for_each(|(s, a)| *s = a.end() as u32);
+                    let last_arg =
+                        unsafe { args.get_unchecked(args.len() - 1) };
+                    end = arg_pos + last_arg.end();
+                    if *insert_ending {
+                        match last_arg {
+                            Argument::Ending(arg_e_step, e_step) => {
+                                end -= e_step - arg_e_step;
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+
+                RangeInnerKind::Normal { len, index: 0, step, spec }
+            }
+        };
+
+        let range = RangeKind { start: curr_pos, end, inner: range_inner };
+        log::trace!("{:?}", &range);
+        self.range.set(Some((key, range)));
+        Some(curr_pos)
+    }
+    fn is_newline_at(&self, pos: usize) -> bool {
+        if pos >= self.tokenlist.len() {
+            return true;
+        }
+        match &self.tokenlist.tokenlist()[pos] {
+            Token::Char(_) => {
+                let source = unsafe { self.source_at(pos + 1) };
+                matches!(source, "\r" | "\n" | "\r\n" | "\n\r")
+            }
+            _ => false,
+        }
+    }
+    fn write_range<'t, T: HWrite>(
+        &self,
+        stream: &mut T,
+    ) -> Result<usize, ErrorKind> {
+        fn fmt_spec(spec: u8) -> CompactString {
+            match spec {
+                b'\x00' .. b'\x20' => {
+                    format_compact!("^^{}", (spec + 0x40) as char)
+                }
+                b'\x7f' => format_compact!("^^{}", '\x3f'),
+                _ => format_compact!("{}", spec as char),
+            }
+        }
+
+        let Some((range_name, range)) = self.range.get() else {
+            return Ok(0);
+        };
+        let curr_pos = self.index.get();
+        if curr_pos < range.start || curr_pos > self.tokenlist.len() {
+            return Ok(0);
+        }
+        if curr_pos == range.start {
+            if self.is_newline_at(curr_pos) {
+                let inner = match range.inner {
+                    RangeInnerKind::NoneArg { .. } => range.inner,
+                    RangeInnerKind::OneArg { .. } => range.inner,
+                    RangeInnerKind::Escape { .. } => range.inner,
+                    RangeInnerKind::Normal { len, index, step, spec } => {
+                        let mut new_step = step;
+                        if new_step[0] > 0 {
+                            new_step[0] -= 1;
+                        }
+                        RangeInnerKind::Normal {
+                            len,
+                            index,
+                            step: new_step,
+                            spec,
+                        }
+                    }
+                };
+                let new_range = RangeKind {
+                    start: range.start + 1,
+                    end: range.end,
+                    inner,
+                };
+                log::trace!(
+                    "Update range: {:?}, cause touching newline",
+                    &range
+                );
+                self.range.set(Some((range_name, new_range)));
+                return Ok(0);
+            }
+
+            let mut iter_step = 0;
+            let escape;
+            let mut possible = String::new();
+
+            match range.inner {
+                RangeInnerKind::NoneArg { range_start, high } => {
+                    if !high {
+                        let source = self
+                            .tokenlist
+                            .source_get(range_start .. range.end)
+                            .unwrap_or_default();
+                        possible.push_str(source);
+                        iter_step = range.end - range.start;
+                    }
+                    escape = !high;
+                }
+                RangeInnerKind::OneArg {
+                    range_start,
+                    arg_start,
+                    arg_end,
+                    high,
+                } => {
+                    if !high {
+                        let source_start = self
+                            .tokenlist
+                            .source_get(range_start .. arg_start)
+                            .unwrap_or_default();
+                        possible.push_str(source_start);
+                        let source_arg = self
+                            .tokenlist
+                            .source_get(arg_start .. arg_end)
+                            .unwrap_or_default();
+                        possible.push_str(source_arg);
+                        iter_step = range.end - range.start;
+                    }
+                    escape = !high;
+                }
+                RangeInnerKind::Escape { range_start, arg_start } => {
+                    let source_start = self
+                        .tokenlist
+                        .source_get(range_start .. arg_start)
+                        .unwrap_or_default();
+                    possible.push_str(source_start);
+                    let source_args = self
+                        .tokenlist
+                        .source_get(arg_start .. range.end)
+                        .unwrap_or_default();
+                    possible.push_str(source_args);
+                    iter_step = range.end - range.start;
+                    escape = true;
+                }
+                RangeInnerKind::Normal { .. } => {
+                    iter_step = 0;
+                    escape = false;
+                }
+            }
+
+            let real_name = HighConfig::real_name(range_name);
+            let a = if escape {
+                format_args!("\\THes{{{}}}{}", real_name, &possible)
+            } else {
+                format_args!("\\THrs{{{}}}{}", real_name, &possible)
+            };
+            self.fmt_raw(stream, a)?;
+
+            Ok(iter_step)
+        } else if curr_pos >= range.end {
+            // use >=
+            if curr_pos > range.end {
+                log::warn!(
+                    "I found current position ({}) > end of range '{}'",
+                    curr_pos,
+                    range_name
+                );
+            }
+            self.range.set(None);
+            let escape = match range.inner {
+                RangeInnerKind::NoneArg { high, .. } => !high,
+                RangeInnerKind::OneArg { high, .. } => !high,
+                RangeInnerKind::Escape { .. } => true,
+                RangeInnerKind::Normal { len, index, step: _, spec } => {
+                    if len > 0 && index == len {
+                        self.fmt_raw(
+                            stream,
+                            format_args!(
+                                "\\THre{{argument.{}}}",
+                                fmt_spec(spec[index as usize - 1])
+                            ),
+                        )?;
+                    }
+                    false
+                }
+            };
+            let real_name = HighConfig::real_name(range_name);
+            let a = if escape {
+                format_args!("\\THee{{{}}}", real_name)
+            } else {
+                format_args!("\\THre{{{}}}", real_name)
+            };
+            self.fmt_raw(stream, a)?;
+            Ok(0)
+        } else {
+            match range.inner {
+                RangeInnerKind::NoneArg { high, .. } => {
+                    if high { /* impossible */ }
+                }
+                RangeInnerKind::OneArg { high, .. } => {
+                    if high { /* impossible */ }
+                }
+                RangeInnerKind::Escape { .. } => {}
+                RangeInnerKind::Normal { len, index, step, spec } => {
+                    if len > index {
+                        if index == 0 {
+                            let arg_index =
+                                step[index as usize] as usize + range.start;
+                            if curr_pos != arg_index {
+                                return Ok(0);
+                            }
+                            self.fmt_raw(
+                                stream,
+                                format_args!(
+                                    "\\THrs{{argument.{}}}",
+                                    fmt_spec(spec[index as usize])
+                                ),
+                            )?;
+                        } else {
+                            let arg_index =
+                                unsafe { *step.get_unchecked(index as usize) }
+                                    as usize
+                                    + step[0] as usize
+                                    + range.start;
+                            if curr_pos != arg_index {
+                                return Ok(0);
+                            }
+                            self.fmt_raw(stream,
+                                format_args!(
+                                    "\\THre{{argument.{}}}\\THrs{{argument.{}}}",
+                                    fmt_spec(spec[index as usize - 1]),
+                                    fmt_spec(spec[index as usize])
+                                )
+                            )?;
+                        }
+                        let inner = RangeInnerKind::Normal {
+                            len,
+                            index: index + 1,
+                            step,
+                            spec,
+                        };
+                        self.range.set(Some((
+                            range_name,
+                            RangeKind { inner, ..range },
+                        )));
+                    }
+                }
+            }
+            return Ok(0);
         }
     }
     unsafe fn source_at(&self, index: usize) -> &str {
@@ -561,16 +1076,30 @@ impl<'a> SourcedFormatter<'a> {
         chr: &Character,
     ) -> Result<Option<&'t Token>, ErrorKind> {
         self.fmt_chr_try_not(stream, chr)?;
+        self.detect_range();
+        if let Some((_, r)) = &self.range.get() {
+            if r.start == self.index.get() || self.index.get() >= r.end {
+                return Ok(None);
+            }
+        }
         while let Some(token) = tokens.next() {
             self.index.set(self.index.get() + 1);
+            self.detect_range();
             match token {
                 Token::Char(c)
                     if matches!(
                         c.catcode,
-                        CatCode::Letter | CatCode::Other
+                        CatCode::Letter | CatCode::Other | CatCode::Space
                     ) && !self.is_newline(c) =>
                 {
-                    self.fmt_chr_try_not(stream, c)?
+                    self.fmt_chr_try_not(stream, c)?;
+                    if let Some((_, r)) = &self.range.get() {
+                        if r.start == self.index.get()
+                            || self.index.get() >= r.end
+                        {
+                            return Ok(None);
+                        }
+                    }
                 }
                 _ => return Ok(Some(token)),
             }
@@ -583,6 +1112,12 @@ impl<'a> SourcedFormatter<'a> {
         stream: &mut T,
         chr: &Character,
     ) -> Result<Option<&'b Token>, ErrorKind> {
+        self.in_comment.set(true);
+
+        // we got: %<index><tokens>
+        let start_pos = self.index.get();
+        let has_range = self.range.get().is_some();
+
         let mut next_char = None;
         let mut fmt_s = String::new();
         self.fmt_chr(stream, chr)?;
@@ -591,6 +1126,13 @@ impl<'a> SourcedFormatter<'a> {
                 next_char = None;
                 nt
             } else {
+                self.detect_range();
+                let n = self.write_range(stream)?;
+                if n > 0 {
+                    self.index.set(self.index.get() + n);
+                    tokens.advance_by(n).unwrap();
+                    continue;
+                }
                 match tokens.next() {
                     Some(t) => {
                         self.index.set(self.index.get() + 1);
@@ -601,7 +1143,8 @@ impl<'a> SourcedFormatter<'a> {
             };
             match token {
                 Token::Char(chr) if self.is_newline(chr) => {
-                    return Ok(Some(token));
+                    next_char = Some(token);
+                    break;
                 }
                 Token::Char(chr)
                     if matches!(
@@ -620,14 +1163,36 @@ impl<'a> SourcedFormatter<'a> {
                 Token::CS(cs) => self.fmt_cs(stream, cs)?,
                 Token::Any(any) => {
                     if *any == ('\r' as u32) || *any == ('\n' as u32) {
-                        return Ok(Some(token));
+                        next_char = Some(token);
+                        break;
                     } else {
                         self.fmt_any(stream, *any)?;
                     }
                 }
             }
         }
-        Ok(None)
+
+        self.in_comment.set(false);
+        match &self.range.get() {
+            Some((_, r)) => {
+                if r.start >= start_pos {
+                    // range started in comment, but did not end in comment
+                    return Err(ErrorKind::HighRangeError);
+                }
+            }
+            None => {
+                if has_range {
+                    // range started before comment, but ended in comment
+                    // but the following code will raise an error,
+                    // start=^\c{cl}, argument='^^J{f}', and code:
+                    // ```tex
+                    // \cl aa % bb.
+                    // ```
+                    return Err(ErrorKind::HighRangeError);
+                }
+            }
+        }
+        Ok(next_char)
     }
     fn write_inline_math<T: HWrite>(
         &self,
@@ -638,9 +1203,17 @@ impl<'a> SourcedFormatter<'a> {
     ) -> Result<(), ErrorKind> {
         self.fmt_chr(stream, chr)?;
         let mut new_chars = tokens.clone();
-        let mut group_level = 0isize;
+        let mut group_level = 0;
         let curr_index = self.index.get();
+        let curr_range = self.range.get();
         loop {
+            self.detect_range();
+            let n = self.write_range(stream)?;
+            if n > 0 {
+                self.index.set(self.index.get() + n);
+                new_chars.advance_by(n).unwrap();
+                continue;
+            }
             let Some(token) = new_chars.next() else {
                 *is_succ = false;
                 break;
@@ -671,8 +1244,54 @@ impl<'a> SourcedFormatter<'a> {
             *tokens = new_chars;
         } else {
             self.index.set(curr_index);
+            self.range.set(curr_range);
         }
         Ok(())
+    }
+    fn write_parameter<T: HWrite>(
+        &self,
+        tokens: &mut Iter<Token>,
+        stream: &mut T,
+        chr: &Character,
+    ) -> Result<(), ErrorKind> {
+        let ref mut s = String::new();
+        let mut tokens_iter = tokens.clone();
+        let mut succ = false;
+        match tokens_iter.next() {
+            Some(nt) => match nt {
+                Token::Char(nc)
+                    if nc.catcode == CatCode::Parameter
+                        || (nc.catcode == CatCode::Other
+                            && nc.charcode.is_ascii_digit()) =>
+                {
+                    self.detect_range();
+                    self.write_range(s)?;
+                    if s.len() == 0 {
+                        succ = true;
+
+                        self.fmt_raw(
+                            s,
+                            format_args!("\\THrs{{{}}}", "parameter"),
+                        )?;
+                        self.fmt_chr(s, chr)?;
+                        self.index.set(self.index.get() + 1);
+                        self.fmt_chr(s, nc)?;
+                        self.fmt_raw(
+                            s,
+                            format_args!("\\THre{{{}}}", "parameter"),
+                        )?;
+                    }
+                }
+                _ => {}
+            },
+            None => {}
+        }
+        if succ {
+            *tokens = tokens_iter;
+            stream.write_str(s)
+        } else {
+            self.fmt_chr(stream, chr)
+        }
     }
     fn fmt_chr_try_not<T: HWrite>(
         &self,
@@ -731,7 +1350,9 @@ impl<'a> HighFormat for SourcedFormatter<'a> {
     fn get_cs_catogery(&self, cs: &ControlSequence) -> CompactString {
         let csname = cs.get_csname();
         match self.high_config.cs_categories.categories(csname) {
-            Some(cs_cat) => CompactString::new(cs_cat),
+            Some(cs_cat) => {
+                CompactString::new(HighConfig::sanitize_name(cs_cat))
+            }
             None => {
                 let engine = primitive_engine(csname);
                 if engine.is_empty() {
@@ -775,7 +1396,7 @@ impl<'a> HighFormat for SourcedFormatter<'a> {
         if let Some(category) =
             self.high_config.char_categories.categories(chr.charcode)
         {
-            CompactString::new(category)
+            CompactString::new(HighConfig::sanitize_name(category))
         } else if matches!(chr.catcode, CatCode::BeginGroup) {
             self.group_level.set(self.group_level.get() + 1);
             format_compact!("group.{}", self.group_level.get())

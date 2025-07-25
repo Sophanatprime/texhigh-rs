@@ -1,6 +1,7 @@
 use compact_str::CompactString;
 use hashers::fx_hash::FxHasher;
 use indexmap::IndexMap;
+use log::warn;
 use regex::{Regex, RegexSet};
 use serde::{Deserialize, Serialize, Serializer};
 use smallvec::SmallVec;
@@ -14,7 +15,7 @@ use std::str::FromStr;
 use std::{fs, io};
 
 use crate::regtex::{RegTEx, RegTExSet};
-use crate::tex::CatCode;
+use crate::tex::{args_parser, CatCode};
 use crate::tokenlist::SourcedTokenList;
 use crate::types::{
     CTabSet, ErrorKind, Position, Token, TokenListBytes, TokenListBytesRef,
@@ -692,6 +693,8 @@ pub struct HighConfig {
     pub lexer: LexerType,
     #[serde(skip_serializing_if = "CharsType::is_empty")]
     pub char_replacements: CharsType,
+    #[serde(skip_serializing_if = "HashSet::is_empty")]
+    pub enable_ranges: HashSet<String, BuildHasherDefault<FxHasher>>,
     #[serde(skip_serializing_if = "RangeType::is_empty")]
     pub ranges: RangeType,
     #[serde(skip_serializing_if = "CharCategories::is_empty")]
@@ -701,6 +704,63 @@ pub struct HighConfig {
     #[serde(skip_serializing_if = "HashMap::is_empty")]
     pub ctabs_fallback:
         HashMap<String, Vec<String>, BuildHasherDefault<FxHasher>>,
+}
+
+impl HighConfig {
+    pub fn new() -> Self {
+        HighConfig::default()
+    }
+
+    pub fn reorganize(&mut self) {
+        self.ranges.0.retain(|k, r| {
+            let contain = self.enable_ranges.contains(k);
+            let contain_s =
+                self.enable_ranges.contains(HighConfig::sanitize_name(k));
+            let args = match r {
+                RangeItem::Escape { arguments, .. } => arguments,
+                RangeItem::Normal { arguments, .. } => arguments,
+            };
+            let arg_check = if args.len() <= 9 {
+                true
+            } else {
+                warn!(
+                    target: "argument counts",
+                    "Too many arguments for {:?} ({} arguments found)",
+                    args.args_specs(), args.len()
+                );
+                false
+            };
+            let res = (contain || contain_s) && arg_check;
+            if !res {
+                log::info!("range '{}' has been removed", k);
+            }
+            res
+        });
+    }
+
+    pub fn sanitize_name(key: &str) -> &str {
+        if key.len() <= 1 || key.as_bytes()[0] != b'+' {
+            return key;
+        }
+        if key.as_bytes()[1] == b'[' {
+            match key.as_bytes().iter().position(|&v| v == b']') {
+                Some(idx) => {
+                    if idx + 1 < key.len() {
+                        key.get(idx + 1 ..).unwrap()
+                    } else {
+                        key
+                    }
+                }
+                None => key.get(1 ..).unwrap(),
+            }
+        } else {
+            &key[1 ..]
+        }
+    }
+
+    pub fn real_name(key: &str) -> &str {
+        Self::sanitize_name(key)
+    }
 }
 impl Default for HighConfig {
     fn default() -> Self {
@@ -714,6 +774,7 @@ impl Default for HighConfig {
             do_not_break: Vec::new(),
             lexer: LexerType::default(),
             char_replacements: CharsType::default(),
+            enable_ranges: HashSet::default(),
             ranges: RangeType::default(),
             char_categories: CharCategories::default(),
             cs_categories: CSCategories::default(),
@@ -791,10 +852,119 @@ impl<'de> Deserialize<'de> for CharsType {
 
 #[derive(Debug, Default, Deserialize, Serialize)]
 #[serde(transparent)]
-pub struct RangeType(pub IndexMap<String, [Category; 2]>);
+pub struct RangeType(
+    IndexMap<String, RangeItem, BuildHasherDefault<FxHasher>>,
+);
 impl RangeType {
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
+    }
+}
+impl Deref for RangeType {
+    type Target = IndexMap<String, RangeItem, BuildHasherDefault<FxHasher>>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(untagged)]
+pub enum RangeItem {
+    Escape {
+        start: Category,
+        arguments: RangeItemArgs,
+        remove_start: bool,
+        #[serde(default)]
+        use_argument: bool,
+        #[serde(default)]
+        insert_ending: bool,
+        #[serde(default)]
+        in_comments: RangeComments,
+    },
+    Normal {
+        start: Category,
+        arguments: RangeItemArgs,
+        #[serde(default)]
+        insert_ending: bool,
+        #[serde(default)]
+        in_comments: RangeComments,
+    },
+}
+
+pub struct RangeItemArgs {
+    specs: String,
+    used_spec_names: Vec<u8>,
+    finder: args_parser::ArgFinder,
+}
+impl RangeItemArgs {
+    pub fn len(&self) -> usize {
+        self.finder.len()
+    }
+    pub fn args_specs(&self) -> &str {
+        &self.specs
+    }
+    pub fn spec_names(&self) -> &[u8] {
+        &self.used_spec_names
+    }
+    pub fn find_all(
+        &self,
+        tokens: &[Token],
+    ) -> Result<Vec<args_parser::Argument>, args_parser::ErrorKind> {
+        self.finder.find_all(tokens)
+    }
+}
+impl std::fmt::Debug for RangeItemArgs {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RangeItemArgs")
+            .field("spec", &self.specs)
+            .field("finder", &format!("[<{} function(s)>]", self.finder.len()))
+            .finish()
+    }
+}
+impl Serialize for RangeItemArgs {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&self.specs)
+    }
+}
+impl<'de> Deserialize<'de> for RangeItemArgs {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use crate::tex::args_parser::ArgFinder;
+        use crate::tex::TokenList;
+        use crate::types::CTab;
+
+        let ref catcode = CTab::document();
+        let specs = String::deserialize(deserializer)?;
+        let spec_tl = TokenList::parse(&specs, catcode);
+        let (finder, names) =
+            ArgFinder::parse_with_specs(&spec_tl).map_err(|_| {
+                serde::de::Error::custom(format!(
+                    "Invalid arguments spec '{}'",
+                    &specs
+                ))
+            })?;
+        Ok(RangeItemArgs { finder, used_spec_names: names, specs })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RangeComments {
+    #[serde(alias = "must")]
+    Required,
+    #[serde(alias = "never", alias = "prohibited")]
+    Forbidden,
+    #[serde(alias = "dontcare", alias = "any")]
+    Irrelevant,
+}
+impl Default for RangeComments {
+    fn default() -> Self {
+        Self::Irrelevant
     }
 }
 
@@ -868,5 +1038,27 @@ mod tests {
         ];
         let categories: TestStruct = toml::from_str(t).unwrap();
         assert_eq!(&categories.key, result);
+    }
+
+    #[test]
+    fn sanitize() {
+        assert_eq!(HighConfig::sanitize_name(""), "");
+        assert_eq!(HighConfig::sanitize_name("@"), "@");
+        assert_eq!(HighConfig::sanitize_name("@+"), "@+");
+        assert_eq!(HighConfig::sanitize_name("EH"), "EH");
+        assert_eq!(HighConfig::sanitize_name("@aaa"), "@aaa");
+        assert_eq!(HighConfig::sanitize_name("好aaa"), "好aaa");
+        assert_eq!(HighConfig::sanitize_name(" aaa"), " aaa");
+        assert_eq!(HighConfig::sanitize_name(" +aaa"), " +aaa");
+        assert_eq!(HighConfig::sanitize_name("+"), "+");
+        assert_eq!(HighConfig::sanitize_name("+aaa"), "aaa");
+        assert_eq!(HighConfig::sanitize_name("+好aaa"), "好aaa");
+        assert_eq!(HighConfig::sanitize_name("+[aaa]"), "+[aaa]");
+        assert_eq!(HighConfig::sanitize_name("+[]aaa"), "aaa");
+        assert_eq!(HighConfig::sanitize_name("+[123]aaa"), "aaa");
+        assert_eq!(HighConfig::sanitize_name("+[123]]aaa"), "]aaa");
+        assert_eq!(HighConfig::sanitize_name("+[[123]]aaa"), "]aaa");
+        assert_eq!(HighConfig::sanitize_name("+[123][456]aaa"), "[456]aaa");
+        assert_eq!(HighConfig::sanitize_name("+[123aaa"), "[123aaa");
     }
 }

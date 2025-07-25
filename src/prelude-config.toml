@@ -15,8 +15,20 @@ do_not_break = []
 lexer = []
 # characters which are needed to be replaced
 char_replacements = []
+enable_ranges = []
 
 [ranges]
+# escape
+escapemath = { start='^\cM\$', arguments='u{$}', remove_start=false }
+'+[\(\)]escapemath' = { start='^\c{\(}', arguments='u\)', remove_start=false }
+'[$$]escapeinside' = { start='^\cM\$', arguments='u{$}', remove_start=true, use_argument=true }
+'[||]escapeinside' = { start='^\cO\|', arguments='u{|}', remove_start=true, use_argument=true }
+'[]texcl' = { start='^\cC.', arguments='^^J{t}', remove_start=true, use_argument=true, insert_ending=true }
+'[e ]texcl' = { start='^\cC.e\ ', arguments='^^J{t}', remove_start=true, use_argument=true, insert_ending=true }
+# normal
+usepackage = { start='^(?:\c{usepackage}|\c{RequirePackage})', arguments='omo' }
+documentclass = { start='^\c{document(?:class|style)}', arguments='om' }
+comment = { start='^\cC.(?:^|[\c[JS].\w])', arguments='^^J{f}' }
 
 # category of characters
 [char_categories]

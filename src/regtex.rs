@@ -2252,6 +2252,8 @@ mod tests {
             r"(?:^|\cJ.|\n)\c{makeatletter}$",
             &[
                 ("\n\\makeatletter", true),
+                (r"^^J\makeatletter", true),
+                (r"^^M\makeatletter", true),
                 (r"\makeatletter", true),
                 (r"a\makeatletter", false),
             ],

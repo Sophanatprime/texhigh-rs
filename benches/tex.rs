@@ -172,7 +172,7 @@ pub fn args_find_all(c: &mut Criterion) {
     assert_eq!(&result[4], &Argument::UnPresent(50));
     assert_eq!(&result[5], &Argument::Span(51, 69));
     assert_eq!(&result[6], &Argument::Span(70, 107));
-    assert_eq!(&result[7], &Argument::Span(107, 108));
+    assert_eq!(&result[7], &Argument::Ending(107, 108));
     assert_eq!(&result[8], &Argument::UnPresent(108));
 
     let mut group = c.benchmark_group("find-args");

@@ -5,6 +5,7 @@ use crate::tex::types::*;
 #[derive(Debug, PartialEq, Clone)]
 #[non_exhaustive]
 pub enum ErrorKind {
+    TooManyArgs { limits: usize, real: usize },
     InvalidArgSpec(Token),
     InvalidArgDelimiter(Token),
     InvalidTokenToTest(Token),
@@ -37,7 +38,7 @@ pub enum Argument {
 }
 
 impl Argument {
-    fn end(&self) -> usize {
+    pub(crate) fn end(&self) -> usize {
         match self {
             Argument::UnPresent(last) => *last,
             Argument::Present(_, last) => *last,
@@ -69,7 +70,15 @@ impl ArgFinder {
     }
 
     pub fn parse(tokens: &[Token]) -> Result<Self, ErrorKind> {
+        let finder = Self::parse_with_specs(tokens)?;
+        Ok(finder.0)
+    }
+
+    pub fn parse_with_specs(
+        tokens: &[Token],
+    ) -> Result<(Self, Vec<u8>), ErrorKind> {
         let mut state = Vec::new();
+        let mut specs = Vec::new();
         let mut tokens_iter = tokens.iter();
 
         while let Some(token) = tokens_iter.next() {
@@ -90,7 +99,10 @@ impl ArgFinder {
                     Some(chr) => {
                         match gen_arg_spec_finder(chr.get(), &mut tokens_iter)?
                         {
-                            Some(finder) => state.push(finder),
+                            Some(finder) => {
+                                state.push(finder);
+                                specs.push(chr.get());
+                            }
                             None => continue,
                         }
                     }
@@ -101,7 +113,7 @@ impl ArgFinder {
             }
         }
 
-        Ok(ArgFinder { state })
+        Ok((ArgFinder { state }, specs))
     }
 
     pub fn find_all(
