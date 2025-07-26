@@ -2,6 +2,7 @@ use std::cell::{Cell, RefCell};
 use std::slice::Iter;
 use std::sync::Arc;
 
+use bitflags::bitflags;
 use compact_str::{format_compact, CompactString, ToCompactString};
 use log::warn;
 use rayon::prelude::*;
@@ -423,14 +424,52 @@ struct RangeKind {
 }
 #[derive(Debug, Clone, Copy)]
 enum RangeInnerKind {
-    NoneArg { range_start: usize, high: bool },
-    OneArg { range_start: usize, arg_start: usize, arg_end: usize, high: bool },
-    Escape { range_start: usize, arg_start: usize },
+    NoneArg {
+        range_start: usize,
+        high: bool,
+    },
+    OneArg {
+        range_start: usize,
+        arg_start: usize,
+        arg_end: usize,
+        high: bool,
+    },
+    Escape {
+        range_start: usize,
+        arg_start: usize,
+    },
     // len <= 9, index <= 9
-    // step[0]: arg_start_pos - start
-    // step[i] (i>0): end of arg_i - arg_start_pos, end of arg_9 = end
+    // step: end pos of arg_i - arg_start
     // spec: arg spec name, ascii letter
-    Normal { len: u8, index: u8, step: [u32; 9], spec: [u8; 9] },
+    Normal {
+        arg_start: usize,
+        len: u8,
+        index: u8,
+        step: [u32; 9],
+        presents: ArgsPresent,
+        spec: [u8; 9],
+    },
+}
+bitflags! {
+    #[derive(Debug, Clone, Copy)]
+    struct ArgsPresent: u16 {
+        const One = 1 << 0;
+        const Two = 1 << 1;
+        const Three = 1 << 2;
+        const Four = 1 << 3;
+        const Five = 1 << 4;
+        const Six = 1 << 5;
+        const Seven = 1 << 6;
+        const Eight = 1 << 7;
+        const Nine = 1 << 8;
+    }
+}
+impl ArgsPresent {
+    fn has(&self, n: u8) -> bool {
+        n > 0
+            && n < 9
+            && self.contains(ArgsPresent::from_bits_retain(1 << n - 1))
+    }
 }
 
 impl<'a> SourcedFormatter<'a> {
@@ -802,33 +841,51 @@ impl<'a> SourcedFormatter<'a> {
                 let len = args.len() as u8;
 
                 let mut spec = [0; 9];
-                spec[.. args.len()]
-                    .copy_from_slice(&arguments.spec_names()[..]);
+                spec[.. args.len()].copy_from_slice(&arguments.spec_names());
 
                 let mut step = [0; 9];
-                step[0] = (arg_pos - curr_pos) as u32;
+                let mut presents = ArgsPresent::empty();
                 if args.len() == 0 {
                     end = arg_pos;
                 } else {
-                    std::iter::zip(
-                        step.iter_mut().skip(1),
-                        args[.. args.len() - 1].iter(),
-                    )
-                    .for_each(|(s, a)| *s = a.end() as u32);
-                    let last_arg =
-                        unsafe { args.get_unchecked(args.len() - 1) };
+                    let mut last_end = 0;
+                    for (i, r) in args.iter().enumerate() {
+                        match r {
+                            Argument::UnPresent(e) => {
+                                if last_end != *e {
+                                    step[i] = *e as u32;
+                                }
+                            }
+                            _ => {
+                                presents |=
+                                    ArgsPresent::from_bits_retain(1 << i);
+                                last_end = r.end();
+                                step[i] = last_end as u32;
+                            }
+                        }
+                    }
+                    let last_arg = &args[args.len() - 1];
                     end = arg_pos + last_arg.end();
                     if *insert_ending {
                         match last_arg {
-                            Argument::Ending(arg_e_step, e_step) => {
-                                end -= e_step - arg_e_step;
+                            Argument::Ending(s_end, e_end) => {
+                                let comp = *e_end - *s_end;
+                                end -= comp;
+                                step[args.len() - 1] -= comp as u32;
                             }
                             _ => {}
                         }
                     }
                 }
 
-                RangeInnerKind::Normal { len, index: 0, step, spec }
+                RangeInnerKind::Normal {
+                    arg_start: arg_pos,
+                    len,
+                    index: 0,
+                    presents,
+                    step,
+                    spec,
+                }
             }
         };
 
@@ -872,27 +929,10 @@ impl<'a> SourcedFormatter<'a> {
         }
         if curr_pos == range.start {
             if self.is_newline_at(curr_pos) {
-                let inner = match range.inner {
-                    RangeInnerKind::NoneArg { .. } => range.inner,
-                    RangeInnerKind::OneArg { .. } => range.inner,
-                    RangeInnerKind::Escape { .. } => range.inner,
-                    RangeInnerKind::Normal { len, index, step, spec } => {
-                        let mut new_step = step;
-                        if new_step[0] > 0 {
-                            new_step[0] -= 1;
-                        }
-                        RangeInnerKind::Normal {
-                            len,
-                            index,
-                            step: new_step,
-                            spec,
-                        }
-                    }
-                };
                 let new_range = RangeKind {
                     start: range.start + 1,
                     end: range.end,
-                    inner,
+                    inner: range.inner,
                 };
                 log::trace!(
                     "Update range: {:?}, cause touching newline",
@@ -982,13 +1022,20 @@ impl<'a> SourcedFormatter<'a> {
                 RangeInnerKind::NoneArg { high, .. } => !high,
                 RangeInnerKind::OneArg { high, .. } => !high,
                 RangeInnerKind::Escape { .. } => true,
-                RangeInnerKind::Normal { len, index, step: _, spec } => {
-                    if len > 0 && index == len {
+                RangeInnerKind::Normal {
+                    arg_start: _,
+                    len,
+                    index,
+                    step: _,
+                    presents,
+                    spec,
+                } => {
+                    if len > 0 && presents.has(index + 1) {
                         self.fmt_raw(
                             stream,
                             format_args!(
                                 "\\THre{{argument.{}}}",
-                                fmt_spec(spec[index as usize - 1])
+                                fmt_spec(spec[index as usize])
                             ),
                         )?;
                     }
@@ -1012,52 +1059,110 @@ impl<'a> SourcedFormatter<'a> {
                     if high { /* impossible */ }
                 }
                 RangeInnerKind::Escape { .. } => {}
-                RangeInnerKind::Normal { len, index, step, spec } => {
+                RangeInnerKind::Normal {
+                    arg_start,
+                    len,
+                    index,
+                    step,
+                    presents,
+                    spec,
+                } => {
                     if len > index {
-                        if index == 0 {
-                            let arg_index =
-                                step[index as usize] as usize + range.start;
-                            if curr_pos != arg_index {
-                                return Ok(0);
-                            }
+                        if curr_pos == arg_start && presents.has(1) {
                             self.fmt_raw(
                                 stream,
                                 format_args!(
                                     "\\THrs{{argument.{}}}",
-                                    fmt_spec(spec[index as usize])
+                                    fmt_spec(spec[0])
                                 ),
                             )?;
-                        } else {
-                            let arg_index =
-                                unsafe { *step.get_unchecked(index as usize) }
-                                    as usize
-                                    + step[0] as usize
-                                    + range.start;
-                            if curr_pos != arg_index {
+                        }
+                        let curr_end = step[index as usize];
+                        let arg_index = arg_start + curr_end as usize;
+                        if presents.has(index + 1) {
+                            if curr_pos < arg_index {
                                 return Ok(0);
                             }
-                            self.fmt_raw(stream,
-                                format_args!(
-                                    "\\THre{{argument.{}}}\\THrs{{argument.{}}}",
-                                    fmt_spec(spec[index as usize - 1]),
-                                    fmt_spec(spec[index as usize])
-                                )
-                            )?;
+                            if curr_pos == arg_index {
+                                self.fmt_raw(
+                                    stream,
+                                    format_args!(
+                                        "\\THre{{argument.{}}}",
+                                        fmt_spec(spec[index as usize])
+                                    ),
+                                )?;
+                            }
+                        }
+                        if presents.has(index + 2) {
+                            if curr_pos < arg_index {
+                                return Ok(0);
+                            }
+                            if curr_pos == arg_index {
+                                self.fmt_raw(
+                                    stream,
+                                    format_args!(
+                                        "\\THrs{{argument.{}}}",
+                                        fmt_spec(spec[index as usize + 1])
+                                    ),
+                                )?;
+                            }
                         }
                         let inner = RangeInnerKind::Normal {
+                            arg_start,
                             len,
                             index: index + 1,
+                            presents,
                             step,
                             spec,
                         };
-                        self.range.set(Some((
-                            range_name,
-                            RangeKind { inner, ..range },
-                        )));
+                        let new_range = RangeKind { inner, ..range };
+                        log::trace!(
+                            "Update range: {:?}, cause stepping index",
+                            &new_range
+                        );
+                        self.range.set(Some((range_name, new_range)));
                     }
                 }
             }
             return Ok(0);
+        }
+    }
+    fn is_range_bound(&self, index: usize, range: &RangeKind) -> bool {
+        if range.start == index || range.end == index {
+            return true;
+        }
+        match range.inner {
+            RangeInnerKind::NoneArg { range_start, high: _ } => {
+                range_start == index
+            }
+            RangeInnerKind::OneArg {
+                range_start,
+                arg_start,
+                arg_end,
+                high: _,
+            } => {
+                range_start == index || arg_start == index || arg_end == index
+            }
+            RangeInnerKind::Escape { range_start, arg_start } => {
+                range_start == index || arg_start == index
+            }
+            RangeInnerKind::Normal {
+                arg_start,
+                len,
+                index: r_idx,
+                step,
+                presents,
+                spec: _,
+            } => {
+                if len == 0 || len == r_idx {
+                    false
+                } else {
+                    let curr_arg_end = step[r_idx as usize];
+                    arg_start == index
+                        || (presents.has(r_idx + 1)
+                            && (arg_start + curr_arg_end as usize == index))
+                }
+            }
         }
     }
     unsafe fn source_at(&self, index: usize) -> &str {
@@ -1076,10 +1181,19 @@ impl<'a> SourcedFormatter<'a> {
         chr: &Character,
     ) -> Result<Option<&'t Token>, ErrorKind> {
         self.fmt_chr_try_not(stream, chr)?;
+
         self.detect_range();
         if let Some((_, r)) = &self.range.get() {
-            if r.start == self.index.get() || self.index.get() >= r.end {
+            let curr_index = self.index.get();
+            if self.is_range_bound(curr_index, r) {
                 return Ok(None);
+            } else {
+                let n = self.write_range(stream)?;
+                if n > 0 {
+                    self.index.set(curr_index + n);
+                    tokens.advance_by(n).unwrap();
+                    self.detect_range();
+                }
             }
         }
         while let Some(token) = tokens.next() {
@@ -1094,10 +1208,15 @@ impl<'a> SourcedFormatter<'a> {
                 {
                     self.fmt_chr_try_not(stream, c)?;
                     if let Some((_, r)) = &self.range.get() {
-                        if r.start == self.index.get()
-                            || self.index.get() >= r.end
-                        {
+                        if self.is_range_bound(self.index.get(), r) {
                             return Ok(None);
+                        } else {
+                            let n = self.write_range(stream)?;
+                            if n > 0 {
+                                self.index.set(self.index.get() + n);
+                                tokens.advance_by(n).unwrap();
+                                self.detect_range();
+                            }
                         }
                     }
                 }
@@ -1175,8 +1294,9 @@ impl<'a> SourcedFormatter<'a> {
         self.in_comment.set(false);
         match &self.range.get() {
             Some((_, r)) => {
-                if r.start >= start_pos {
+                if r.start >= start_pos && r.start < self.index.get() {
                     // range started in comment, but did not end in comment
+                    log::error!("Range start: {}, string start: {}, current position: {}", r.start, start_pos, self.index.get());
                     return Err(ErrorKind::HighRangeError);
                 }
             }
@@ -1188,6 +1308,11 @@ impl<'a> SourcedFormatter<'a> {
                     // ```tex
                     // \cl aa % bb.
                     // ```
+                    log::error!(
+                        "String start: {}, current position: {}",
+                        start_pos,
+                        self.index.get()
+                    );
                     return Err(ErrorKind::HighRangeError);
                 }
             }
