@@ -426,17 +426,18 @@ struct RangeKind {
 enum RangeInnerKind {
     NoneArg {
         range_start: usize,
-        high: bool,
+        insert_brace: bool,
     },
     OneArg {
         range_start: usize,
         arg_start: usize,
         arg_end: usize,
-        high: bool,
+        insert_brace: bool,
     },
     Escape {
         range_start: usize,
         arg_start: usize,
+        insert_brace: bool,
     },
     // len <= 9, index <= 9
     // step: end pos of arg_i - arg_start
@@ -539,6 +540,20 @@ impl<'a> SourcedFormatter<'a> {
                         ),
                     )?;
                     if let Some(last_token) = last_token {
+                        // the range may end at endline,
+                        // we subtract index by 1 in write_comment, now add it back
+                        if self.range.get().is_some() {
+                            // at this position, we may replace a range by the range before the comment
+                            // now write the range which is before the comment
+                            self.write_range(stream)?;
+                            // then try detect range, if a range start with newline,
+                            // it was detected in comment, but it was replaced, we now detect it
+                            self.detect_range();
+                            // if found a range, it must start with newline,
+                            // we will skip newline in write_range, so it's ok
+                            self.write_range(stream)?;
+                        }
+                        self.index.set(self.index.get() + 1);
                         self.fmt_token(stream, last_token)?;
                     }
                 }
@@ -671,8 +686,8 @@ impl<'a> SourcedFormatter<'a> {
                 }
             };
             log::trace!(
-                "Found range: {{ start_pos: {}, arg_pos: {}, key: {:?}, item: {:?} }}",
-                curr_pos, arg_pos, k, r
+                "Found range [key: {:?}] {{ start_pos: {}, arg_pos: {}, item: {:?} }}",
+                k, curr_pos, arg_pos, r
             );
             Some((arg_pos, k, r))
         })?;
@@ -687,6 +702,7 @@ impl<'a> SourcedFormatter<'a> {
                 start: _,
                 arguments,
                 remove_start,
+                insert_brace,
                 use_argument,
                 insert_ending,
                 in_comments: _,
@@ -707,7 +723,10 @@ impl<'a> SourcedFormatter<'a> {
                 if args.len() == 0 {
                     let range_start =
                         if *remove_start { arg_pos } else { curr_pos };
-                    RangeInnerKind::NoneArg { range_start, high: false }
+                    RangeInnerKind::NoneArg {
+                        range_start,
+                        insert_brace: *insert_brace,
+                    }
                 } else if args.len() == 1 {
                     let the_arg = &args[0];
                     let the_spec_name =
@@ -798,7 +817,7 @@ impl<'a> SourcedFormatter<'a> {
                         range_start,
                         arg_start,
                         arg_end,
-                        high: false,
+                        insert_brace: *insert_brace,
                     }
                 } else {
                     let last_arg =
@@ -814,7 +833,11 @@ impl<'a> SourcedFormatter<'a> {
                     }
                     let range_start =
                         if *remove_start { arg_pos } else { curr_pos };
-                    RangeInnerKind::Escape { range_start, arg_start: arg_pos }
+                    RangeInnerKind::Escape {
+                        range_start,
+                        arg_start: arg_pos,
+                        insert_brace: *insert_brace,
+                    }
                 }
             }
             RangeItem::Normal {
@@ -936,50 +959,53 @@ impl<'a> SourcedFormatter<'a> {
                 };
                 log::trace!(
                     "Update range: {:?}, cause touching newline",
-                    &range
+                    &new_range
                 );
                 self.range.set(Some((range_name, new_range)));
                 return Ok(0);
             }
 
-            let mut iter_step = 0;
+            let iter_step;
             let escape;
+            let mut escape_brace = false;
             let mut possible = String::new();
 
             match range.inner {
-                RangeInnerKind::NoneArg { range_start, high } => {
-                    if !high {
-                        let source = self
-                            .tokenlist
-                            .source_get(range_start .. range.end)
-                            .unwrap_or_default();
-                        possible.push_str(source);
-                        iter_step = range.end - range.start;
-                    }
-                    escape = !high;
+                RangeInnerKind::NoneArg { range_start, insert_brace } => {
+                    let source = self
+                        .tokenlist
+                        .source_get(range_start .. range.end)
+                        .unwrap_or_default();
+                    possible.push_str(source);
+                    iter_step = range.end - range.start;
+                    escape = true;
+                    escape_brace = insert_brace;
                 }
                 RangeInnerKind::OneArg {
                     range_start,
                     arg_start,
                     arg_end,
-                    high,
+                    insert_brace,
                 } => {
-                    if !high {
-                        let source_start = self
-                            .tokenlist
-                            .source_get(range_start .. arg_start)
-                            .unwrap_or_default();
-                        possible.push_str(source_start);
-                        let source_arg = self
-                            .tokenlist
-                            .source_get(arg_start .. arg_end)
-                            .unwrap_or_default();
-                        possible.push_str(source_arg);
-                        iter_step = range.end - range.start;
-                    }
-                    escape = !high;
+                    let source_start = self
+                        .tokenlist
+                        .source_get(range_start .. arg_start)
+                        .unwrap_or_default();
+                    possible.push_str(source_start);
+                    let source_arg = self
+                        .tokenlist
+                        .source_get(arg_start .. arg_end)
+                        .unwrap_or_default();
+                    possible.push_str(source_arg);
+                    iter_step = range.end - range.start;
+                    escape = true;
+                    escape_brace = insert_brace;
                 }
-                RangeInnerKind::Escape { range_start, arg_start } => {
+                RangeInnerKind::Escape {
+                    range_start,
+                    arg_start,
+                    insert_brace,
+                } => {
                     let source_start = self
                         .tokenlist
                         .source_get(range_start .. arg_start)
@@ -992,6 +1018,7 @@ impl<'a> SourcedFormatter<'a> {
                     possible.push_str(source_args);
                     iter_step = range.end - range.start;
                     escape = true;
+                    escape_brace = insert_brace;
                 }
                 RangeInnerKind::Normal { .. } => {
                     iter_step = 0;
@@ -1001,7 +1028,11 @@ impl<'a> SourcedFormatter<'a> {
 
             let real_name = HighConfig::real_name(range_name);
             let a = if escape {
-                format_args!("\\THes{{{}}}{}", real_name, &possible)
+                if escape_brace {
+                    format_args!("\\THes{{{}}}{{{}", real_name, &possible)
+                } else {
+                    format_args!("\\THes{{{}}}{}", real_name, &possible)
+                }
             } else {
                 format_args!("\\THrs{{{}}}{}", real_name, &possible)
             };
@@ -1018,10 +1049,16 @@ impl<'a> SourcedFormatter<'a> {
                 );
             }
             self.range.set(None);
-            let escape = match range.inner {
-                RangeInnerKind::NoneArg { high, .. } => !high,
-                RangeInnerKind::OneArg { high, .. } => !high,
-                RangeInnerKind::Escape { .. } => true,
+            let (escape, escape_brace) = match range.inner {
+                RangeInnerKind::NoneArg { insert_brace, .. } => {
+                    (true, insert_brace)
+                }
+                RangeInnerKind::OneArg { insert_brace, .. } => {
+                    (true, insert_brace)
+                }
+                RangeInnerKind::Escape { insert_brace, .. } => {
+                    (true, insert_brace)
+                }
                 RangeInnerKind::Normal {
                     arg_start: _,
                     len,
@@ -1039,12 +1076,16 @@ impl<'a> SourcedFormatter<'a> {
                             ),
                         )?;
                     }
-                    false
+                    (false, false)
                 }
             };
             let real_name = HighConfig::real_name(range_name);
             let a = if escape {
-                format_args!("\\THee{{{}}}", real_name)
+                if escape_brace {
+                    format_args!("}}\\THee{{{}}}", real_name)
+                } else {
+                    format_args!("\\THee{{{}}}", real_name)
+                }
             } else {
                 format_args!("\\THre{{{}}}", real_name)
             };
@@ -1052,12 +1093,8 @@ impl<'a> SourcedFormatter<'a> {
             Ok(0)
         } else {
             match range.inner {
-                RangeInnerKind::NoneArg { high, .. } => {
-                    if high { /* impossible */ }
-                }
-                RangeInnerKind::OneArg { high, .. } => {
-                    if high { /* impossible */ }
-                }
+                RangeInnerKind::NoneArg { .. } => {}
+                RangeInnerKind::OneArg { .. } => {}
                 RangeInnerKind::Escape { .. } => {}
                 RangeInnerKind::Normal {
                     arg_start,
@@ -1132,20 +1169,22 @@ impl<'a> SourcedFormatter<'a> {
             return true;
         }
         match range.inner {
-            RangeInnerKind::NoneArg { range_start, high: _ } => {
+            RangeInnerKind::NoneArg { range_start, insert_brace: _ } => {
                 range_start == index
             }
             RangeInnerKind::OneArg {
                 range_start,
                 arg_start,
                 arg_end,
-                high: _,
+                insert_brace: _,
             } => {
                 range_start == index || arg_start == index || arg_end == index
             }
-            RangeInnerKind::Escape { range_start, arg_start } => {
-                range_start == index || arg_start == index
-            }
+            RangeInnerKind::Escape {
+                range_start,
+                arg_start,
+                insert_brace: _,
+            } => range_start == index || arg_start == index,
             RangeInnerKind::Normal {
                 arg_start,
                 len,
@@ -1233,9 +1272,69 @@ impl<'a> SourcedFormatter<'a> {
     ) -> Result<Option<&'b Token>, ErrorKind> {
         self.in_comment.set(true);
 
-        // we got: %<index><tokens>
+        // we got: %<index><tokens>..^^M
         let start_pos = self.index.get();
-        let has_range = self.range.get().is_some();
+        let mut old_range = None;
+        let has_range = match &self.range.get() {
+            Some((k, r)) => match r.inner {
+                RangeInnerKind::NoneArg { .. } => true,
+                RangeInnerKind::OneArg { .. } => true,
+                RangeInnerKind::Escape { .. } => true,
+                RangeInnerKind::Normal {
+                    arg_start,
+                    len,
+                    index: i_idx,
+                    step,
+                    presents,
+                    spec,
+                } => {
+                    if len > 0 && i_idx == 0 && presents.has(1) {
+                        let n = tokens
+                            .clone()
+                            .enumerate()
+                            .position(|(i, _)| {
+                                self.is_newline_at(start_pos + i)
+                            })
+                            .unwrap_or(tokens.as_slice().len());
+                        if step[i_idx as usize] as usize + arg_start
+                            == start_pos + n
+                        {
+                            let fake_range = RangeKind {
+                                start: r.start,
+                                end: r.end + 1,
+                                inner: r.inner,
+                            };
+                            log::trace!(
+                                "Update range: {:?}, cause in comment",
+                                &fake_range
+                            );
+                            self.range.set(Some((*k, fake_range)));
+
+                            let fake_present =
+                                presents.difference(ArgsPresent::One);
+                            let fake_inner = RangeInnerKind::Normal {
+                                arg_start,
+                                len,
+                                index: i_idx,
+                                step,
+                                presents: fake_present,
+                                spec,
+                            };
+                            let mut new_r = *r;
+                            new_r.inner = fake_inner;
+                            old_range = Some((*k, new_r));
+
+                            false
+                        } else {
+                            true
+                        }
+                    } else {
+                        true
+                    }
+                }
+            },
+            None => false,
+        };
 
         let mut next_char = None;
         let mut fmt_s = String::new();
@@ -1262,6 +1361,8 @@ impl<'a> SourcedFormatter<'a> {
             };
             match token {
                 Token::Char(chr) if self.is_newline(chr) => {
+                    // we can asure index > 0, becasue at least one token exists
+                    self.index.set(self.index.get() - 1);
                     next_char = Some(token);
                     break;
                 }
@@ -1316,6 +1417,9 @@ impl<'a> SourcedFormatter<'a> {
                     return Err(ErrorKind::HighRangeError);
                 }
             }
+        }
+        if old_range.is_some() {
+            self.range.set(old_range);
         }
         Ok(next_char)
     }
@@ -1529,6 +1633,8 @@ impl<'a> HighFormat for SourcedFormatter<'a> {
             let level = self.group_level.get();
             self.group_level.set(level - 1);
             format_compact!("group.{}", level)
+        } else if !matches!(chr.catcode, CatCode::Letter | CatCode::Other) {
+            format_compact!("catcode.{}", chr.catcode as u8)
         } else {
             CompactString::const_new("?")
         }

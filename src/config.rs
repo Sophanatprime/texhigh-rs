@@ -875,6 +875,8 @@ pub enum RangeItem {
         arguments: RangeItemArgs,
         remove_start: bool,
         #[serde(default)]
+        insert_brace: bool,
+        #[serde(default)]
         use_argument: bool,
         #[serde(default)]
         insert_ending: bool,
