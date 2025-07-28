@@ -1442,8 +1442,12 @@ impl<'a> SourcedFormatter<'a> {
         self.fmt_chr(stream, chr)?;
         let mut new_chars = tokens.clone();
         let mut group_level = 0;
+
+        let curr_group_level = self.group_level.get();
+        let curr_in_comment = self.in_comment.get();
         let curr_index = self.index.get();
         let curr_range = self.range.get();
+        
         loop {
             self.detect_range();
             let n = self.write_range(stream)?;
@@ -1481,6 +1485,8 @@ impl<'a> SourcedFormatter<'a> {
         if *is_succ {
             *tokens = new_chars;
         } else {
+            self.group_level.set(curr_group_level);
+            self.in_comment.set(curr_in_comment);
             self.index.set(curr_index);
             self.range.set(curr_range);
         }
