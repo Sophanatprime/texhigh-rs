@@ -1850,11 +1850,11 @@ dependencies = [
 
 [[package]]
 name = "texhigh"
-version = "0.2.4"
+version = "0.3.0"
 dependencies = [
  "anstyle",
  "anyhow",
- "base64 0.22.1",
+ "base64 0.21.7",
  "bitflags 2.6.0",
  "byte-unit",
  "clap",
