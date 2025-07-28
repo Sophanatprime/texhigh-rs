@@ -580,6 +580,12 @@ pub fn command_high(m: &ArgMatches) {
         if th_config.high_config.lines == [0, 0]
             && th_config.high_config.gobble.0 == 0
         {
+            let mut s = s;
+            if s.ends_with("\r\n") {
+                s.truncate(s.len() - 2);
+            } else if s.ends_with("\n") {
+                s.truncate(s.len() - 1);
+            }
             return s;
         }
         if th_config.high_config.lines == [0, 0] {

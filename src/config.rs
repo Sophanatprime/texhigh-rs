@@ -694,7 +694,7 @@ pub struct HighConfig {
     #[serde(skip_serializing_if = "CharsType::is_empty")]
     pub char_replacements: CharsType,
     #[serde(skip_serializing_if = "HashSet::is_empty")]
-    pub enable_ranges: HashSet<String, BuildHasherDefault<FxHasher>>,
+    pub enabled_ranges: HashSet<String, BuildHasherDefault<FxHasher>>,
     #[serde(skip_serializing_if = "RangeType::is_empty")]
     pub ranges: RangeType,
     #[serde(skip_serializing_if = "CharCategories::is_empty")]
@@ -713,9 +713,9 @@ impl HighConfig {
 
     pub fn reorganize(&mut self) {
         self.ranges.0.retain(|k, r| {
-            let contain = self.enable_ranges.contains(k);
+            let contain = self.enabled_ranges.contains(k);
             let contain_s =
-                self.enable_ranges.contains(HighConfig::sanitize_name(k));
+                self.enabled_ranges.contains(HighConfig::sanitize_name(k));
             let args = match r {
                 RangeItem::Escape { arguments, .. } => arguments,
                 RangeItem::Normal { arguments, .. } => arguments,
@@ -774,7 +774,7 @@ impl Default for HighConfig {
             do_not_break: Vec::new(),
             lexer: LexerType::default(),
             char_replacements: CharsType::default(),
-            enable_ranges: HashSet::default(),
+            enabled_ranges: HashSet::default(),
             ranges: RangeType::default(),
             char_categories: CharCategories::default(),
             cs_categories: CSCategories::default(),

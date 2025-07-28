@@ -112,7 +112,8 @@ impl HWrite for Null {
 }
 
 /// Indentifier ::=
-/// `\THnl` : new line;
+/// `\THls` : line start;
+/// `\THle` : line end;
 /// `\THin{<len>}` : indent;
 /// `\THbp{<category>}` : break point;
 /// `\THcs{<category>}{<escape char>}{<csname>}` : control sequence;
@@ -193,7 +194,7 @@ pub trait HighFormat {
         write!(stream, "{}", args)
     }
     fn fmt_newline<T: HWrite>(&self, stream: &mut T) -> Result<(), ErrorKind> {
-        self.fmt_raw(stream, format_args!("\\THnl\n"))
+        self.fmt_raw(stream, format_args!("\n"))
     }
     fn fmt_indent<T: HWrite>(
         &self,
@@ -457,6 +458,12 @@ impl HighFormat for StandardFormatter<'_> {
             CompactString::const_new("?")
         }
     }
+    // we asure that the line counts is the counts of \n minus 1
+    // \n is not the last char of token source,
+    // is ok that we insert \THle\THls when we meet newline
+    fn fmt_newline<T: HWrite>(&self, stream: &mut T) -> Result<(), ErrorKind> {
+        self.fmt_raw(stream, format_args!("\\THle\n\\THls"))
+    }
     fn fmt_punct<T: HWrite>(
         &self,
         stream: &mut T,
@@ -546,6 +553,11 @@ impl HighFormat for StandardFormatter<'_> {
         stream: &mut T,
         tokenlist: &[Token],
     ) -> Result<(), ErrorKind> {
+        let close_el = !tokenlist.is_empty();
+        if close_el {
+            self.fmt_raw(stream, format_args!("\\THls"))?;
+        }
+
         let mut next_token: Option<&Token> = None;
         let mut tokenlist_iter = tokenlist.iter();
         let mut fmt_s = String::new();
@@ -651,6 +663,10 @@ impl HighFormat for StandardFormatter<'_> {
                     self.fmt_token(stream, token)?;
                 }
             }
+        }
+
+        if close_el {
+            self.fmt_raw(stream, format_args!("\\THle"))?;
         }
         Ok(())
     }

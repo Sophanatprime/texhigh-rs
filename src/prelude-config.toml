@@ -10,22 +10,54 @@ replace_tab = true
 tabs_len = 2
 # lines of text to be highlight
 lines = [0, 0]
+# do not break
+# do_not_break = ['<item>', ...]
+# where '<item>' is a '<Regular Expression>' or '\I<Regular Expression>' or '\T<TeX Regular Expression>'
+# regular expression (both TeX and text) must be start-anchored (i.e., '^\\relax')
 do_not_break = []
 # array of lexer rules when parse TeX text
+# lexer = [<item>, ...]
+# where <item> is ['<start>', '<end>', <action>]
+# where '<start>' and '<end>' are '<line no>' or [<line no>, '<column>'] or '' or '\L' or '<TeX Regular Expression>' or
+# '\T<TeX Regular Expression> or '\I<Regular Expression>' or '\L<string>'
+# regular expression (both TeX and text) must be end-anchored (i.e., '\I^\\relax$')
+# where '<action>' is { action="EndLine", value=<integer> } or { action="CatCode", value=<catcode action> },
+# where <catcode action> is '<ctab name>' or [ [<char>, '<catcode>'], ... ]
 lexer = []
 # characters which are needed to be replaced
+# is a character array or a string 
 char_replacements = []
-enable_ranges = []
+# string array
+# ranges which are needed to be enabled
+enabled_ranges = []
 
 [ranges]
+# '<key>' = <key-values table>
+# if '<key>' starts with '+', texhigh will ignore the '+' and the following '[..]',
+# i.e, the three different keys 'mykey', '+mykey', '+[some]mykey' are all identified as 'mykey'.
 # escape
-escapemath = { start='^\cM\$', arguments='u{$}', remove_start=false }
-'+[\(\)]escapemath' = { start='^\c{\(}', arguments='u\)', remove_start=false }
+# texhigh is according to the existence of <remove_start> key to detect whether a range is escaped or not.
+# keys:
+# <start> is '<TeX regular expression>' or '\T<TeX Regular Expression>' or '\I<Regular Expression>' or '\L<plain text>'.
+# regular expression (both TeX and text) must be start-anchored (i.e., '\I^\\relax')
+# <arguments> is the ltcmd (xparse) argument spec.
+# <remove_start> will remove the starting component of a range.
+# <use_argument> will remove the delimiters or braces of a argument.
+# <insert_brace> will insert a `{` before the arguments and insert a `}` after the arguments.
+# if <use_argument> is true, <insert_ending> will insert the endline char (`\n`) after the range if the argument is one of `u`, `u`, `^^J`.
+# <in_comments> sets the region of a range to be detected, can be "required", "never", "any".
+'+[$$]escapemath' = { start='^\cM\$', arguments='u{$}', remove_start=false }
+'+[()]escapemath' = { start='^\c{\(}', arguments='u\)', remove_start=false }
 '[$$]escapeinside' = { start='^\cM\$', arguments='u{$}', remove_start=true, use_argument=true }
 '[||]escapeinside' = { start='^\cO\|', arguments='u{|}', remove_start=true, use_argument=true }
 '[]texcl' = { start='^\cC.', arguments='^^J{t}', remove_start=true, use_argument=true, insert_ending=true }
 '[e ]texcl' = { start='^\cC.e\ ', arguments='^^J{t}', remove_start=true, use_argument=true, insert_ending=true }
 # normal
+# keys:
+# <start>
+# <arguments>
+# <insert_ending>
+# <in_comments>
 usepackage = { start='^(?:\c{usepackage}|\c{RequirePackage})', arguments='omo' }
 documentclass = { start='^\c{document(?:class|style)}', arguments='om' }
 comment = { start='^\cC.(?:^|[\c[JS].\w])', arguments='^^J{f}' }
@@ -38,6 +70,9 @@ comment = { start='^\cC.(?:^|[\c[JS].\w])', arguments='^^J{f}' }
 # eg. symbol = ['$', '\I[\ \\#%&]', '\L|']
 
 [cs_categories]
+# key = '<Regular Expression>'
+# key = ['<item>', ...]
+# where '<item>' is a '<cs name>' or '\I<Regular Expression>' or '\L<cs name>'
 'latex.document' = [
     "DocumentMetadata", "documentclass", "documentstyle", "begin", "end", "usepackage",
     "title", "author", "date", "thanks", "maketitle",

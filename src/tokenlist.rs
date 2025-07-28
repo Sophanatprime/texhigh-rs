@@ -478,6 +478,11 @@ impl<'a> SourcedFormatter<'a> {
         &self,
         stream: &mut T,
     ) -> Result<(), ErrorKind> {
+        let close_el = !self.tokenlist.is_empty();
+        if close_el {
+            self.fmt_raw(stream, format_args!("\\THls"))?;
+        }
+
         let mut next_token: Option<&Token> = None;
         let mut tokenlist_iter = self.tokenlist.tl.iter();
         let mut fmt_s = String::new();
@@ -586,6 +591,10 @@ impl<'a> SourcedFormatter<'a> {
                     self.fmt_token(stream, token)?;
                 }
             }
+        }
+
+        if close_el {
+            self.fmt_raw(stream, format_args!("\\THle"))?;
         }
         Ok(())
     }
@@ -1643,6 +1652,9 @@ impl<'a> HighFormat for SourcedFormatter<'a> {
         let source = self.source_of_current();
         // should take catcode into consideration?
         matches!(source, "\r" | "\n" | "\r\n" | "\n\r")
+    }
+    fn fmt_newline<T: HWrite>(&self, stream: &mut T) -> Result<(), ErrorKind> {
+        self.fmt_raw(stream, format_args!("\\THle\n\\THls"))
     }
     fn fmt_chr<T: HWrite>(
         &self,
