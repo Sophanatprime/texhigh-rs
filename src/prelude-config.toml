@@ -60,7 +60,7 @@ enabled_ranges = []
 # <in_comments>
 usepackage = { start='^(?:\c{usepackage}|\c{RequirePackage})', arguments='omo' }
 documentclass = { start='^\c{document(?:class|style)}', arguments='om' }
-comment = { start='^\cC.(?:^|[\c[JS].\w])', arguments='^^J{f}' }
+comment = { start='^\cC.(?:$|[\c[JS].\w])', arguments='^^J{f}' }
 
 # category of characters
 [char_categories]

@@ -104,7 +104,7 @@ impl Layout {
         self.text_buffer.set_text(
             &mut self.font_system,
             text,
-            attrs,
+            &attrs,
             Shaping::Advanced,
         );
         let mut line_is = vec![];

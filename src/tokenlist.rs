@@ -5,7 +5,6 @@ use std::sync::Arc;
 use bitflags::bitflags;
 use compact_str::{format_compact, CompactString, ToCompactString};
 use log::warn;
-use rayon::prelude::*;
 
 use crate::config::{
     Category, CategorySpan, HighConfig, LexerType, RangeComments,
@@ -1578,7 +1577,7 @@ impl<'a> SourcedFormatter<'a> {
             let no_break = self
                 .high_config
                 .do_not_break
-                .par_iter()
+                .iter()
                 .any(|v| v.contains_at(tokenlist, .. index));
             if no_break {
                 log::trace!("Do not break before the token: {:?}", chr);
@@ -1696,7 +1695,7 @@ impl<'a> HighFormat for SourcedFormatter<'a> {
                 let no_break = self
                     .high_config
                     .do_not_break
-                    .par_iter()
+                    .iter()
                     .any(|v| v.contains_at(tokenlist, .. index));
                 if no_break {
                     log::trace!("Do not break before the token: {:?}", chr);
@@ -1718,7 +1717,7 @@ impl<'a> HighFormat for SourcedFormatter<'a> {
         let no_break = self
             .high_config
             .do_not_break
-            .par_iter()
+            .iter()
             .any(|v| v.contains_at(tokenlist, .. index));
 
         if no_break {

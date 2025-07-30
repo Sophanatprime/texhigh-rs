@@ -1,6 +1,6 @@
 [package]
 name = "texhigh"
-version = "0.3.0"
+version = "0.3.1"
 edition = "2021"
 
 [dependencies]
@@ -11,7 +11,7 @@ bitflags = "2"
 byte-unit = "*"
 clap = "~4"
 compact_str = { version = "*", features = ["serde"] }
-config = "^0.15"
+config = { version = "^0.15", default-features = false, features = ["toml", "preserve_order"] }
 cosmic-text = "*"
 dirs = "*"
 encoding_rs = "*"
