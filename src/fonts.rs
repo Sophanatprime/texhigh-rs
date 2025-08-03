@@ -1538,7 +1538,7 @@ pub fn display_font_data<W: std::fmt::Write>(
     let total_chars = blocks.iter().fold(0, |acc, (_, (n, ..))| acc + n);
     let total_glyphs = face.maxp().map_or(0, |v| v.num_glyphs());
     let chars_glyphs = if total_glyphs > 0 {
-        format!("{} <- {}", total_chars, total_glyphs)
+        format!("{} ({} glyphs)", total_chars, total_glyphs)
     } else {
         format!("{}", total_chars)
     };

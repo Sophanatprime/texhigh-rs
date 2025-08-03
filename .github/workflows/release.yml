@@ -25,6 +25,12 @@ jobs:
             bin_prefix: texhigh
             package_ext: tar.gz
             profile: release
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            bin_prefix: texhigh
+            package_ext: tar.gz
+            profile: release
+            is_linux_gnu: true
           - target: x86_64-apple-darwin
             os: macos-latest
             bin_prefix: texhigh
@@ -50,12 +56,18 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y musl-tools musl-dev
 
+    - name: Install GNU build tools
+      if: matrix.target == 'x86_64-unknown-linux-gnu'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential
+
     - name: Build project
       run: cargo build --profile ${{ matrix.profile }} --target ${{ matrix.target }} --verbose
       env:
         RUSTFLAGS: >
           ${{ matrix.target == 'x86_64-pc-windows-msvc' && '-C target-feature=+crt-static' || '' }}
-          ${{ matrix.target == 'x86_64-unknown-linux-musl' && '-C link-arg=-s' || '' }}
+          ${{ (matrix.target == 'x86_64-unknown-linux-musl' || matrix.target == 'x86_64-unknown-linux-gnu') && '-C link-arg=-s' || '' }}
 
     - name: Create binaries directory
       run: mkdir release-binaries
