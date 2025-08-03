@@ -26,7 +26,7 @@ jobs:
             package_ext: tar.gz
             profile: release
           - target: x86_64-unknown-linux-gnu
-            os: ubuntu-latest
+            os: ubuntu-22.04
             bin_prefix: texhigh
             package_ext: tar.gz
             profile: release
