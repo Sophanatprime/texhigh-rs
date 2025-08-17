@@ -493,11 +493,13 @@ impl<'a> SourcedFormatter<'a> {
                 }
                 None => {
                     self.detect_range();
-                    let n = self.write_range(stream)?;
-                    if n > 0 {
+                    if let Some(n) = self.write_range(stream)? {
                         self.index.set(self.index.get() + n);
                         tokenlist_iter.advance_by(n).unwrap();
-                        continue;
+                        if self.range.get().is_none() || n > 0 {
+                            // if range is cleared, we need detect a new one
+                            continue;
+                        }
                     }
                     match tokenlist_iter.next() {
                         Some(token) => {
@@ -943,7 +945,7 @@ impl<'a> SourcedFormatter<'a> {
     fn write_range<'t, T: HWrite>(
         &self,
         stream: &mut T,
-    ) -> Result<usize, ErrorKind> {
+    ) -> Result<Option<usize>, ErrorKind> {
         fn fmt_spec(spec: u8) -> CompactString {
             match spec {
                 b'\x00' .. b'\x20' => {
@@ -955,11 +957,11 @@ impl<'a> SourcedFormatter<'a> {
         }
 
         let Some((range_name, range)) = self.range.get() else {
-            return Ok(0);
+            return Ok(None);
         };
         let curr_pos = self.index.get();
         if curr_pos < range.start || curr_pos > self.tokenlist.len() {
-            return Ok(0);
+            return Ok(None);
         }
         if curr_pos == range.start {
             if self.is_newline_at(curr_pos) {
@@ -973,7 +975,7 @@ impl<'a> SourcedFormatter<'a> {
                     &new_range
                 );
                 self.range.set(Some((range_name, new_range)));
-                return Ok(0);
+                return Ok(None);
             }
 
             let iter_step;
@@ -1061,7 +1063,7 @@ impl<'a> SourcedFormatter<'a> {
             };
             self.fmt_raw(stream, a)?;
 
-            Ok(iter_step)
+            Ok(Some(iter_step))
         } else if curr_pos >= range.end {
             // use >=
             if curr_pos > range.end {
@@ -1113,8 +1115,9 @@ impl<'a> SourcedFormatter<'a> {
                 format_args!("\\THre{{{}}}", real_name)
             };
             self.fmt_raw(stream, a)?;
-            Ok(0)
+            Ok(Some(0))
         } else {
+            let mut done = false;
             match range.inner {
                 RangeInnerKind::NoneArg { .. } => {}
                 RangeInnerKind::OneArg { .. } => {}
@@ -1129,6 +1132,7 @@ impl<'a> SourcedFormatter<'a> {
                 } => {
                     if len > index {
                         if curr_pos == arg_start && presents.has(1) {
+                            done = true;
                             self.fmt_raw(
                                 stream,
                                 format_args!(
@@ -1141,9 +1145,10 @@ impl<'a> SourcedFormatter<'a> {
                         let arg_index = arg_start + curr_end as usize;
                         if presents.has(index + 1) {
                             if curr_pos < arg_index {
-                                return Ok(0);
+                                return Ok(None);
                             }
                             if curr_pos == arg_index {
+                                done = true;
                                 self.fmt_raw(
                                     stream,
                                     format_args!(
@@ -1155,9 +1160,10 @@ impl<'a> SourcedFormatter<'a> {
                         }
                         if presents.has(index + 2) {
                             if curr_pos < arg_index {
-                                return Ok(0);
+                                return Ok(None);
                             }
                             if curr_pos == arg_index {
+                                done = true;
                                 self.fmt_raw(
                                     stream,
                                     format_args!(
@@ -1184,7 +1190,7 @@ impl<'a> SourcedFormatter<'a> {
                     }
                 }
             }
-            return Ok(0);
+            return Ok(done.then_some(0));
         }
     }
     fn is_range_bound(&self, index: usize, range: &RangeKind) -> bool {
@@ -1250,8 +1256,7 @@ impl<'a> SourcedFormatter<'a> {
             if self.is_range_bound(curr_index, r) {
                 return Ok(None);
             } else {
-                let n = self.write_range(stream)?;
-                if n > 0 {
+                if let Some(n) = self.write_range(stream)? {
                     self.index.set(curr_index + n);
                     tokens.advance_by(n).unwrap();
                     self.detect_range();
@@ -1273,8 +1278,7 @@ impl<'a> SourcedFormatter<'a> {
                         if self.is_range_bound(self.index.get(), r) {
                             return Ok(None);
                         } else {
-                            let n = self.write_range(stream)?;
-                            if n > 0 {
+                            if let Some(n) = self.write_range(stream)? {
                                 self.index.set(self.index.get() + n);
                                 tokens.advance_by(n).unwrap();
                                 self.detect_range();
@@ -1368,8 +1372,7 @@ impl<'a> SourcedFormatter<'a> {
                 nt
             } else {
                 self.detect_range();
-                let n = self.write_range(stream)?;
-                if n > 0 {
+                if let Some(n) = self.write_range(stream)? {
                     self.index.set(self.index.get() + n);
                     tokens.advance_by(n).unwrap();
                     continue;
@@ -1464,8 +1467,7 @@ impl<'a> SourcedFormatter<'a> {
 
         loop {
             self.detect_range();
-            let n = self.write_range(stream)?;
-            if n > 0 {
+            if let Some(n) = self.write_range(stream)? {
                 self.index.set(self.index.get() + n);
                 new_chars.advance_by(n).unwrap();
                 continue;
