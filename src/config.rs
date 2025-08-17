@@ -882,6 +882,8 @@ pub enum RangeItem {
         insert_ending: bool,
         #[serde(default)]
         in_comments: RangeComments,
+        #[serde(default)]
+        start_is_arg: bool,
     },
     Normal {
         start: Category,
@@ -890,7 +892,30 @@ pub enum RangeItem {
         insert_ending: bool,
         #[serde(default)]
         in_comments: RangeComments,
+        #[serde(default)]
+        start_is_arg: bool,
     },
+}
+
+impl RangeItem {
+    pub fn insert_ending(&self) -> bool {
+        match self {
+            RangeItem::Escape { insert_ending, .. } => *insert_ending,
+            RangeItem::Normal { insert_ending, .. } => *insert_ending,
+        }
+    }
+    pub fn in_comments(&self) -> RangeComments {
+        match self {
+            RangeItem::Escape { in_comments, .. } => *in_comments,
+            RangeItem::Normal { in_comments, .. } => *in_comments,
+        }
+    }
+    pub fn start_is_arg(&self) -> bool {
+        match self {
+            RangeItem::Escape { start_is_arg, .. } => *start_is_arg,
+            RangeItem::Normal { start_is_arg, .. } => *start_is_arg,
+        }
+    }
 }
 
 pub struct RangeItemArgs {

@@ -344,7 +344,7 @@ impl Default for CatCode {
 
 impl Into<CatCodeSet> for CatCode {
     fn into(self) -> CatCodeSet {
-        CatCodeSet::from_bits_retain(1u16 << self as u16)
+        CatCodeSet::from_bits_retain(1u16 << self as u8)
     }
 }
 impl<I, T> From<T> for CatCodeSet
@@ -772,9 +772,37 @@ impl Token {
             false
         }
     }
+    pub fn is_control_word(&self) -> bool {
+        if let Token::CS(cs) = self {
+            cs.tag() == 0
+        } else {
+            false
+        }
+    }
+    pub fn is_control_symbol(&self) -> bool {
+        if let Token::CS(cs) = self {
+            cs.tag() == 1
+        } else {
+            false
+        }
+    }
+    pub fn is_control_space(&self) -> bool {
+        if let Token::CS(cs) = self {
+            cs.tag() == 2
+        } else {
+            false
+        }
+    }
     pub fn is_char(&self, token: Option<Character>) -> bool {
         if let Token::Char(chr) = self {
             token.is_none() || *chr == token.unwrap()
+        } else {
+            false
+        }
+    }
+    pub fn is_catcodes(&self, catcodes: impl Into<CatCodeSet>) -> bool {
+        if let Token::Char(c) = self {
+            catcodes.into().contains_catcode(c.catcode)
         } else {
             false
         }

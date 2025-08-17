@@ -1,5 +1,7 @@
 use std::num::NonZeroU8;
 
+use smallvec::SmallVec;
+
 use crate::tex::types::*;
 
 #[derive(Debug, PartialEq, Clone)]
@@ -243,17 +245,19 @@ fn gen_arg_spec_finder(
             ArgSpec::G(ArgMissingValue::default())
         }
         b'u' => {
+            let mut t_vec = SmallVec::new();
             let t =
-                scan_one_token(token_iter, ArgGroupStatus::Optional, false)
-                    .map_err(|_| invalid_spec.clone())?;
-            ArgSpec::u(t)
+                scan_tokens(token_iter).map_err(|_| invalid_spec.clone())?;
+            t.iter().for_each(|t| t_vec.push(t.clone()));
+            ArgSpec::u(t_vec)
         }
         b'U' => {
+            let mut t_vec = SmallVec::new();
             let t =
-                scan_one_token(token_iter, ArgGroupStatus::Optional, false)
-                    .map_err(|_| invalid_spec.clone())?;
+                scan_tokens(token_iter).map_err(|_| invalid_spec.clone())?;
+            t.iter().for_each(|t| t_vec.push(t.clone()));
             skip_one_arg(token_iter).map_err(|_| invalid_spec.clone())?;
-            ArgSpec::U(t, ArgMissingValue)
+            ArgSpec::U(t_vec, ArgMissingValue)
         }
         b'p' | b'P' | b'k' | b'T' | b'e' | b'E' | b'w' | b'W' => {
             return Err(ErrorKind::UnimplementedArgSpec(spec_name as char));
@@ -426,6 +430,38 @@ where
     index
 }
 
+fn scan_tokens<'t>(
+    token_iter: &'t mut std::slice::Iter<'_, Token>,
+) -> Result<&'t [Token], ()> {
+    skip_if_char_iter(token_iter, |_, cat| {
+        matches!(cat, CatCode::EndLine | CatCode::Space | CatCode::Ignored)
+    });
+
+    let slice = token_iter.as_slice();
+
+    let mut step = 1;
+    match token_iter.next().ok_or(())? {
+        Token::CS(_) => {}
+        Token::Char(chr) => {
+            if chr.catcode == CatCode::EndGroup {
+                return Err(());
+            }
+
+            if chr.catcode == CatCode::BeginGroup {
+                skip_to_end_group(slice, &mut step)?;
+                token_iter.advance_by(step - 1).unwrap();
+            }
+        }
+        _ => return Err(()),
+    }
+
+    if step == 1 {
+        Ok(&slice[0 .. step])
+    } else {
+        Ok(&slice[1 .. step - 1])
+    }
+}
+
 fn scan_one_token(
     token_iter: &mut std::slice::Iter<'_, Token>,
     group: ArgGroupStatus,
@@ -549,11 +585,9 @@ pub enum ArgSpec {
     l,
     g,
     G(ArgMissingValue),
-    u(Token),
-    U(Token, ArgMissingValue),
+    u(SmallVec<[Token; 2]>),
+    U(SmallVec<[Token; 2]>, ArgMissingValue),
     /* unimplement, maybe never?
-    u(SmallVec<[Token; 4]>),
-    U(SmallVec<[Token; 4]>, ArgMissingValue),
     p(SmallVec<[Token; 4]>),
     P(SmallVec<[Token; 4]>, ArgMissingValue),
     k(CompactString),
@@ -564,6 +598,7 @@ pub enum ArgSpec {
     W(SmallVec<[(Token, Option<Token>); 4]>, ArgMissingValue),
     */
     Line(bool),
+    Any(Finder),
 }
 
 impl ArgSpec {
@@ -679,19 +714,42 @@ impl ArgSpec {
             ArgSpec::l => grabber_l(),
             ArgSpec::g => grabber_g('g'),
             ArgSpec::G(_) => grabber_g('G'),
-            ArgSpec::u(t) => {
+            ArgSpec::u(t_vec) => {
                 if check {
-                    check_delimiter(&t, true, ErrorKind::InvalidArgDelimiter)?;
+                    if t_vec.is_empty() {
+                        return Err(ErrorKind::InvalidArgSpec(
+                            Token::new_char('c', CatCode::Other),
+                        ));
+                    }
+                    for t in t_vec.iter() {
+                        check_delimiter(
+                            t,
+                            true,
+                            ErrorKind::InvalidArgDelimiter,
+                        )?;
+                    }
                 }
-                grabber_u(t, 'u')
+                grabber_u(t_vec, 'u')
             }
-            ArgSpec::U(t, _) => {
+            ArgSpec::U(t_vec, _) => {
                 if check {
-                    check_delimiter(&t, true, ErrorKind::InvalidArgDelimiter)?;
+                    if t_vec.is_empty() {
+                        return Err(ErrorKind::InvalidArgSpec(
+                            Token::new_char('c', CatCode::Other),
+                        ));
+                    }
+                    for t in t_vec.iter() {
+                        check_delimiter(
+                            t,
+                            true,
+                            ErrorKind::InvalidArgDelimiter,
+                        )?;
+                    }
                 }
-                grabber_u(t, 'U')
+                grabber_u(t_vec, 'U')
             }
             ArgSpec::Line(balanced) => grabber_current_line(balanced),
+            ArgSpec::Any(finder) => finder,
         };
         Ok(finder)
     }
@@ -703,6 +761,152 @@ impl ArgSpec {
     ) -> Result<Argument, ErrorKind> {
         self.into_finder(true)?(tl.as_ref(), start)
     }
+}
+
+fn is_balanced(tl: &[Token]) -> bool {
+    let mut group_level = 0;
+    for token in tl {
+        if let Token::Char(c) = token {
+            if c.catcode == CatCode::BeginGroup {
+                group_level += 1;
+            } else if c.catcode == CatCode::EndGroup {
+                group_level -= 1;
+            }
+        }
+    }
+    group_level == 0
+}
+
+fn find_tl(haystack: &[Token], needle: &[Token]) -> Option<(usize, usize)> {
+    if needle.len() <= 1 || !is_balanced(needle) {
+        return find_tl_unbalanced(haystack, needle);
+    }
+
+    let mut ret = find_tl_unbalanced(haystack, needle)?;
+    let mut index = 0;
+    while index < haystack.len() {
+        match &haystack[index] {
+            Token::Char(chr) if chr.catcode == CatCode::EndGroup => {
+                if ret.1 <= index {
+                    return Some(ret);
+                } else {
+                    return None;
+                }
+            }
+            Token::Char(chr) if chr.catcode == CatCode::BeginGroup => {
+                if ret.1 <= index {
+                    return Some(ret);
+                }
+                let tmp = index;
+                index += 1;
+                skip_to_end_group(haystack, &mut index).ok()?;
+                if ret.0 <= tmp && ret.1 >= index {
+                    // haystack: `ab{cd}ef`, needle: `b{cd}`, or `{cd}e`, etc.
+                    continue;
+                } else if ret.0 >= index {
+                    index = ret.0;
+                } else {
+                    if index < haystack.len() {
+                        ret = find_tl_unbalanced(&haystack[index ..], needle)?;
+                        ret.0 += index;
+                        ret.1 += index;
+                    } else {
+                        return None;
+                    }
+                }
+            }
+            _ => {
+                index += 1;
+            }
+        }
+    }
+
+    Some(ret)
+}
+
+fn find_tl_unbalanced(
+    haystack: &[Token],
+    needle: &[Token],
+) -> Option<(usize, usize)> {
+    let n = needle.len();
+    match n {
+        0 => return Some((0, 0)),
+        1 => {
+            let test = &needle[0];
+            let mut index = 0;
+            while index < haystack.len() {
+                match &haystack[index] {
+                    Token::Char(chr) if chr.catcode == CatCode::EndGroup => {
+                        return None;
+                    }
+                    Token::Char(chr) if chr.catcode == CatCode::BeginGroup => {
+                        index += 1;
+                        skip_to_end_group(haystack, &mut index).ok()?;
+                    }
+                    token @ _ => {
+                        if token == test {
+                            return Some((index, index + 1));
+                        } else {
+                            index += 1;
+                        }
+                    }
+                }
+            }
+            return None;
+        }
+        _ if haystack.is_empty() => return None,
+        _ => {}
+    }
+
+    fn skip_spaces(tl: &[Token], index: &mut usize) {
+        *index += 1;
+        while let Some(token) = tl.get(*index) {
+            if token.is_catcodes([
+                CatCode::EndLine,
+                CatCode::Space,
+                CatCode::Ignored,
+            ]) {
+                *index += 1;
+            } else {
+                break;
+            }
+        }
+        *index -= 1;
+    }
+
+    'outer: for start in 0 .. haystack.len() {
+        let mut h_i = start; // haystack index
+        let mut n_i = 0; // needle index
+        loop {
+            let Some(needle_token) = needle.get(n_i) else {
+                break;
+            };
+            if let Token::CS(cs) = needle_token {
+                if cs.tag() != 1 {
+                    // is cs and not control symbol
+                    skip_spaces(needle, &mut n_i);
+                }
+            }
+
+            let haystack_token = haystack.get(h_i);
+            if let Some(Token::CS(cs)) = haystack_token {
+                if cs.tag() != 1 {
+                    skip_spaces(haystack, &mut h_i);
+                }
+            }
+
+            match (needle_token, haystack_token) {
+                (n_t, Some(h_t)) if n_t == h_t => {
+                    h_i += 1;
+                    n_i += 1;
+                }
+                _ => continue 'outer,
+            }
+        }
+
+        return Some((start, h_i));
+    }
+    None
 }
 
 pub fn grab_normal_argument<'t>(
@@ -1073,40 +1277,19 @@ fn grabber_g(spec_name: char) -> Finder {
     Box::new(finder)
 }
 
-fn grabber_u(test: Token, spec_name: char) -> Finder {
-    let finder = move |tl: &[Token],
-                       start: usize|
-          -> Result<Argument, ErrorKind> {
-        if start >= tl.len() {
-            return Err(ErrorKind::MissingMandatoryArg(spec_name));
-        }
-
-        let mut index = start;
-        while index < tl.len() {
-            match &tl[index] {
-                Token::Char(chr) if chr.catcode == CatCode::EndGroup => {
-                    return Err(ErrorKind::UncompletedArg(spec_name));
-                }
-                Token::Char(chr) if chr.catcode == CatCode::BeginGroup => {
-                    index += 1;
-                    skip_to_end_group(tl, &mut index)
-                        .map_err(|_| ErrorKind::UncompletedArg(spec_name))?;
-                }
-                token @ _ => {
-                    if token == &test {
-                        let end = index;
-                        index += 1;
-                        // need step index, we get: <tokens><test token>
-                        return Ok(Argument::Ending(end, index));
-                    } else {
-                        index += 1;
-                    }
-                }
+fn grabber_u(test: SmallVec<[Token; 2]>, spec_name: char) -> Finder {
+    assert!(!test.is_empty(), "delimiters of arg spec `u` cannot be empty");
+    let finder =
+        move |tl: &[Token], start: usize| -> Result<Argument, ErrorKind> {
+            // test cannot be empty.
+            if start >= tl.len() {
+                return Err(ErrorKind::MissingMandatoryArg(spec_name));
             }
-        }
 
-        Err(ErrorKind::UncompletedArg(spec_name))
-    };
+            let del_start = find_tl(&tl[start ..], &test)
+                .ok_or_else(|| ErrorKind::UncompletedArg(spec_name))?;
+            Ok(Argument::Ending(start + del_start.0, start + del_start.1))
+        };
     Box::new(finder)
 }
 
@@ -1154,6 +1337,105 @@ fn grabber_current_line(balanced: bool) -> Finder {
 mod tests {
     use super::*;
     use crate::types::CTab;
+
+    #[test]
+    fn test_find_tl() {
+        let source = r##"\a bc{jk\l}\relax   \.oken\. end\l  \m\n"##;
+        let catcode = CTab::document();
+        let tl = TokenList::parse(source, &catcode);
+
+        assert_eq!(
+            find_tl(&tl, &TokenList::parse(r"", &catcode)),
+            Some((0, 0))
+        );
+        // needle.len = 1, match needle exactly
+        assert_eq!(
+            find_tl(&tl, &TokenList::parse(r"\a", &catcode)),
+            Some((0, 1))
+        );
+        // needle.len > 1, match spaces after control word as much as possible
+        assert_eq!(
+            find_tl(&tl, &TokenList::parse(r"\a ", &catcode)),
+            Some((0, 2))
+        );
+        assert_eq!(
+            find_tl(&tl, &TokenList::parse(r"bc", &catcode)),
+            Some((2, 4))
+        );
+        assert_eq!(find_tl(&tl, &TokenList::parse(r"b c", &catcode)), None);
+        // unbalanced tl, match needle exactly
+        assert_eq!(
+            find_tl(&tl, &TokenList::parse(r"bc{", &catcode)),
+            Some((2, 5))
+        );
+        assert_eq!(
+            find_tl(&tl, &TokenList::parse(r"bc{jk\l}", &catcode)),
+            Some((2, 9))
+        );
+        assert_eq!(
+            find_tl(&tl, &TokenList::parse(r"bc{jk\l  }", &catcode)),
+            Some((2, 9))
+        );
+        // balanced tl, but is protected by { }
+        assert_eq!(find_tl(&tl, &TokenList::parse(r"jk", &catcode)), None);
+        assert_eq!(
+            find_tl(&tl, &TokenList::parse(r"\relax", &catcode)),
+            Some((9, 10))
+        );
+        assert_eq!(
+            find_tl(&tl, &TokenList::parse(r"\relax ", &catcode)),
+            Some((9, 13))
+        );
+        assert_eq!(
+            find_tl(&tl, &TokenList::parse(r"\relax   ", &catcode)),
+            Some((9, 13))
+        );
+        assert_eq!(
+            find_tl(&tl, &TokenList::parse(r"\relax      ", &catcode)),
+            Some((9, 13))
+        );
+        assert_eq!(
+            find_tl(&tl, &TokenList::parse(r"}\relax", &catcode)),
+            Some((8, 13))
+        );
+        assert_eq!(
+            find_tl(&tl, &TokenList::parse(r"}\relax ", &catcode)),
+            Some((8, 13))
+        );
+        assert_eq!(
+            find_tl(&tl, &TokenList::parse(r"}\relax     ", &catcode)),
+            Some((8, 13))
+        );
+        assert_eq!(
+            find_tl(&tl, &TokenList::parse(r" \relax", &catcode)),
+            None
+        );
+        assert_eq!(
+            find_tl(&tl, &TokenList::parse(r"\.", &catcode)),
+            Some((13, 14))
+        );
+        assert_eq!(
+            find_tl(&tl, &TokenList::parse(r"  \.", &catcode)),
+            Some((11, 14))
+        );
+        assert_eq!(
+            find_tl(&tl, &TokenList::parse(r"\. ", &catcode)),
+            Some((18, 20))
+        );
+        assert_eq!(find_tl(&tl, &TokenList::parse(r"\.    ", &catcode)), None);
+        assert_eq!(
+            find_tl(&tl, &TokenList::parse(r"\l", &catcode)),
+            Some((23, 24))
+        );
+        assert_eq!(
+            find_tl(&tl, &TokenList::parse(r"\l   ", &catcode)),
+            Some((23, 26))
+        );
+        assert_eq!(
+            find_tl(&tl, &TokenList::parse(r"\l\m\n", &catcode)),
+            Some((23, 28))
+        );
+    }
 
     #[test]
     fn skip_args() {
@@ -1234,6 +1516,14 @@ mod tests {
             false
         )
         .is_err());
+
+        let tl = TokenList::parse(r" { ab\f } {.} \relax {}", &catcode);
+        let mut iter = tl.iter();
+        assert_eq!(scan_tokens(&mut iter), Ok(&tl[2 .. 7]));
+        assert_eq!(scan_tokens(&mut iter), Ok(&tl[10 .. 11]));
+        assert_eq!(scan_tokens(&mut iter), Ok(&tl[13 .. 14]));
+        assert_eq!(scan_tokens(&mut iter), Ok(&tl[16 .. 16]));
+        assert_eq!(scan_tokens(&mut iter), Err(()));
     }
 
     #[test]

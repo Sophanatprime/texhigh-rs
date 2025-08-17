@@ -700,6 +700,7 @@ impl<'a> SourcedFormatter<'a> {
             Some((arg_pos, k, r))
         })?;
 
+        let arg_pos = if item.start_is_arg() { curr_pos } else { arg_pos };
         // curr_pos <= arg_pos <= tl.len
         assert!(arg_pos <= tl.len());
         let args_tl = unsafe { tl.get_unchecked(arg_pos ..) };
@@ -714,6 +715,7 @@ impl<'a> SourcedFormatter<'a> {
                 use_argument,
                 insert_ending,
                 in_comments: _,
+                start_is_arg: _,
             } => {
                 let args = match arguments.find_all(args_tl) {
                     Ok(args) => args,
@@ -853,6 +855,7 @@ impl<'a> SourcedFormatter<'a> {
                 arguments,
                 insert_ending,
                 in_comments: _,
+                start_is_arg: _,
             } => {
                 let args = match arguments.find_all(args_tl) {
                     Ok(args) => args,
@@ -1028,9 +1031,21 @@ impl<'a> SourcedFormatter<'a> {
                     escape = true;
                     escape_brace = insert_brace;
                 }
-                RangeInnerKind::Normal { .. } => {
+                RangeInnerKind::Normal {
+                    arg_start,
+                    index,
+                    presents,
+                    spec,
+                    ..
+                } => {
                     iter_step = 0;
                     escape = false;
+                    if curr_pos == arg_start && presents.has(1) && index == 0 {
+                        possible.push_str(&format!(
+                            "\\THrs{{argument.{}}}",
+                            fmt_spec(spec[0])
+                        ));
+                    }
                 }
             }
 
@@ -1446,7 +1461,7 @@ impl<'a> SourcedFormatter<'a> {
         let curr_in_comment = self.in_comment.get();
         let curr_index = self.index.get();
         let curr_range = self.range.get();
-        
+
         loop {
             self.detect_range();
             let n = self.write_range(stream)?;
