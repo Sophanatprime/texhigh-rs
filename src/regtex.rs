@@ -2167,7 +2167,7 @@ mod tests {
                 assert_eq!(
                     m,
                     res,
-                    "Mismatched pattern,\n\tHaystack: {:?}\n\tTokenList: {:?}\n\tAst: {:?}\n\tPattern: {:?}",
+                    "Mismatched pattern,\n\tHaystack: {:?}\n\tTokenList: {}\n\tAst: {:?}\n\tPattern: {:?}",
                     ts,
                     tl.to_str_repr(),
                     &b,
@@ -2240,6 +2240,18 @@ mod tests {
         );
         test_pattern(r"(?-i)* (?i).+", &[("? ?l", true)]);
         test_pattern(r"a|b|c|", &[("a", true), ("b", true), ("c", true)]);
+        test_pattern(
+            r"\c{a}",
+            &[(r"\a", true), (r"\b", false), (r"\ab", false), (r"\ba", false)],
+        );
+        test_pattern(
+            r"\c{.}",
+            &[(r"\a", true), (r"\.", true), (r"\ab", false)],
+        );
+        test_pattern(
+            r"\c{.+}",
+            &[(r"\a", true), (r"\.", true), (r"\ab", true)],
+        );
         test_pattern(
             r"(a|\c{.}|c|)",
             &[("a", true), (r"\?", true), ("c", true)],
