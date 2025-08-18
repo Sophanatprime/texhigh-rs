@@ -1,3 +1,19 @@
+/* lib.rs
+Copyright (C) 2024-2025, Wenjian Chern.
+
+    This program is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program.  If not, see <https://www.gnu.org/licenses/>. */
+
 #![feature(step_trait, iter_advance_by, debug_closure_helpers)]
 
 use clap::{arg, value_parser, Arg, ArgAction, ArgMatches, Command};
@@ -58,11 +74,11 @@ use crate::{
 
 const FULL_VERSION: &str = env!("CARGO_PKG_VERSION");
 const DATE: &str = "2025/07/30";
-const COPYRIGHT: &str = "2024-2025, Wenjian Chern ©";
+const COPYRIGHT: &str = "2024-2025, Wenjian Chern";
 
 pub fn print_copyright(s: &'static str) {
     println!(
-        "{} version {} ({}), copyright {}.",
+        "{} version {} ({}), copyright (C) {}.",
         s, FULL_VERSION, DATE, COPYRIGHT
     );
 }
