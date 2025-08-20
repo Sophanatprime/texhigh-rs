@@ -295,6 +295,16 @@ pub fn get_matches() -> ArgMatches {
         );
     let layout = Command::new("layout")
         .arg(
+            Arg::new("system-fonts")
+                .long("system-fonts")
+                .alias("sf")
+                .value_parser(value_parser!(bool))
+                .num_args(0..=1)
+                .default_missing_value("true")
+                .default_value("false")
+                .help("Wether load system fonts or not.")
+        )
+        .arg(
             Arg::new("output")
                 .long("output")
                 .short('o')
@@ -1351,7 +1361,11 @@ pub fn command_layout(m: &ArgMatches) {
 
     let mut lay = layout::Layout::new(&fontdb, &fonts);
 
-    lay.add_system_fonts();
+    let load_system_fonts =
+        m.get_one::<bool>("system-fonts").unwrap_or(&false);
+    if *load_system_fonts {
+        lay.add_system_fonts();
+    }
     lay.font_size = font_size;
     lay.line_height = line_height;
     lay.text_width = width;

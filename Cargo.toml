@@ -12,7 +12,7 @@ byte-unit = "*"
 clap = "~4"
 compact_str = { version = "*", features = ["serde"] }
 config = { version = "^0.15", default-features = false, features = ["toml", "preserve_order"] }
-cosmic-text = "*"
+cosmic-text = { version = "*", default-features = false, features = ["std", "swash"] }
 dirs = "*"
 encoding_rs = "*"
 enum_dispatch = "*"
