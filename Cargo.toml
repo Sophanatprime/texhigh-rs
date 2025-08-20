@@ -77,8 +77,4 @@ name = "tl"
 harness = false
 
 [profile.release]
-panic = "abort"
-
-[profile.release-windows]
-inherits = "release"
-panic = "unwind"
+strip = true

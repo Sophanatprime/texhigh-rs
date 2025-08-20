@@ -19,7 +19,7 @@ jobs:
             os: windows-latest
             bin_prefix: texhigh
             package_ext: zip
-            profile: release-windows
+            profile: release
           - target: x86_64-unknown-linux-musl
             os: ubuntu-latest
             bin_prefix: texhigh
