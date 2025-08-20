@@ -137,7 +137,7 @@ mod pest_cs_type {
 pub fn args_parse_spec(c: &mut Criterion) {
     let ref catcode = CTab::document();
     let spec = r##" s l m o O{long\relax argument}
-        r\left\right R(){required} u{^^M} g"##;
+        r\left\right R(){required} u{^^M} g ,{\BooleanFalse}"##;
     let spec = TokenList::parse(spec, catcode);
 
     let mut group = c.benchmark_group("parse-spec");
@@ -170,17 +170,17 @@ pub fn args_find_normal(c: &mut Criterion) {
 pub fn args_find_all(c: &mut Criterion) {
     let ref catcode = CTab::document();
     let spec = r##" s l m o O{long\relax argument}
-        r\left\right R(){required} u{^^M} g"##;
+        r\left\right R(){required} u{^^M} g ,{\BooleanFalse}"##;
     let spec = TokenList::parse(spec, catcode);
     let finder = ArgFinder::parse(&spec).unwrap();
     let source = r##"
 * {a mandatory\{ argument} [a [optional] argument]
-\left[\left(some braces\right)\right (the (required) (delimited) argument)^^M
+\left[\left(some braces\right)\right (the (required) (delimited) argument)^^M key
 "##;
     let source = TokenList::parse(source, catcode);
 
     let result = finder.find_all(&source).unwrap();
-    assert_eq!(result.len(), 9);
+    assert_eq!(result.len(), 10);
     assert_eq!(&result[0], &Argument::Present(1, 2));
     assert_eq!(&result[1], &Argument::Span(2, 3));
     assert_eq!(&result[2], &Argument::Span(3, 26));
@@ -190,6 +190,7 @@ pub fn args_find_all(c: &mut Criterion) {
     assert_eq!(&result[6], &Argument::Span(70, 107));
     assert_eq!(&result[7], &Argument::Ending(107, 108));
     assert_eq!(&result[8], &Argument::UnPresent(108));
+    assert_eq!(&result[9], &Argument::Present(109, 112));
 
     let mut group = c.benchmark_group("find-args");
     group.sample_size(1_0000);

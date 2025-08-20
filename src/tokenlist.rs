@@ -464,6 +464,7 @@ enum RangeInnerKind {
         step: [u32; 9],
         presents: ArgsPresent,
         spec: [u8; 9],
+        args_numbered: bool,
     },
 }
 bitflags! {
@@ -710,6 +711,10 @@ impl<'a> SourcedFormatter<'a> {
                     };
                     curr_pos + token_counts
                 }
+                Category::ArgsParser(parser) => {
+                    let args = parser.finder.find_all(&tl[curr_pos..]).ok()?;
+                    curr_pos + args.last().map_or(0, |arg| arg.end())
+                }
             };
             log::trace!(
                 "Found range [key: {:?}] {{ start_pos: {}, arg_pos: {}, item: {:?} }}",
@@ -776,7 +781,7 @@ impl<'a> SourcedFormatter<'a> {
                                         arg_pos + s_step + 1,
                                         arg_pos + e_step - 1,
                                     ),
-                                    b's' | b't' | _ => {
+                                    b's' | b't' | b',' | _ => {
                                         (arg_pos + s_step, arg_pos + e_step)
                                     }
                                 }
@@ -874,6 +879,7 @@ impl<'a> SourcedFormatter<'a> {
                 insert_ending,
                 in_comments: _,
                 start_is_arg: _,
+                args_numbered,
             } => {
                 let args = match arguments.find_all(args_tl) {
                     Ok(args) => args,
@@ -937,6 +943,7 @@ impl<'a> SourcedFormatter<'a> {
                     presents,
                     step,
                     spec,
+                    args_numbered: *args_numbered,
                 }
             }
         };
@@ -962,13 +969,31 @@ impl<'a> SourcedFormatter<'a> {
         &self,
         stream: &mut T,
     ) -> Result<Option<usize>, ErrorKind> {
-        fn fmt_spec(spec: u8) -> CompactString {
-            match spec {
-                b'\x00' .. b'\x20' => {
-                    format_compact!("^^{}", (spec + 0x40) as char)
+        #[inline]
+        fn fmt_spec(specs: [u8; 9], index: u8, is_num: bool) -> CompactString {
+            #[cfg(debug_assertions)]
+            assert!(
+                index < 9,
+                "number of arguments can be greater than 9, current: {}",
+                index
+            );
+            if is_num {
+                unsafe {
+                    // 0 <= index <= 8
+                    // num + 0x31 \in '1'..='9'
+                    CompactString::from_utf8_unchecked([
+                        index.unchecked_add(0x31)
+                    ])
                 }
-                b'\x7f' => format_compact!("^^{}", '\x3f'),
-                _ => format_compact!("{}", spec as char),
+            } else {
+                let spec = unsafe { *specs.get_unchecked(index as usize) };
+                match spec {
+                    b'\x00' .. b'\x20' => {
+                        format_compact!("^^{}", (spec + 0x40) as char)
+                    }
+                    b'\x7f' => format_compact!("^^{}", '\x3f'),
+                    _ => format_compact!("{}", spec as char),
+                }
             }
         }
 
@@ -981,10 +1006,64 @@ impl<'a> SourcedFormatter<'a> {
         }
         if curr_pos == range.start {
             if self.is_newline_at(curr_pos) {
+                let try_step = |num: usize| -> usize {
+                    if num == range.start {
+                        num + 1
+                    } else {
+                        num
+                    }
+                };
+                let new_start = range.start + 1;
+                let new_end = try_step(range.end);
+                let new_inner = match range.inner {
+                    RangeInnerKind::OneArg {
+                        range_start,
+                        arg_start,
+                        arg_end,
+                        insert_brace,
+                    } => RangeInnerKind::OneArg {
+                        range_start: try_step(range_start),
+                        arg_start: try_step(arg_start),
+                        arg_end: try_step(arg_end),
+                        insert_brace,
+                    },
+                    RangeInnerKind::NoneArg { range_start, insert_brace } => {
+                        RangeInnerKind::NoneArg {
+                            range_start: try_step(range_start),
+                            insert_brace,
+                        }
+                    }
+                    RangeInnerKind::Escape {
+                        range_start,
+                        arg_start,
+                        insert_brace,
+                    } => RangeInnerKind::Escape {
+                        range_start: try_step(range_start),
+                        arg_start: try_step(arg_start),
+                        insert_brace,
+                    },
+                    RangeInnerKind::Normal {
+                        arg_start,
+                        len,
+                        index,
+                        step,
+                        presents,
+                        spec,
+                        args_numbered,
+                    } => RangeInnerKind::Normal {
+                        arg_start: try_step(arg_start),
+                        len,
+                        index,
+                        step,
+                        presents,
+                        spec,
+                        args_numbered,
+                    },
+                };
                 let new_range = RangeKind {
-                    start: range.start + 1,
-                    end: range.end,
-                    inner: range.inner,
+                    start: new_start,
+                    end: new_end,
+                    inner: new_inner,
                 };
                 log::trace!(
                     "Update range: {:?}, cause touching newline",
@@ -1054,6 +1133,7 @@ impl<'a> SourcedFormatter<'a> {
                     index,
                     presents,
                     spec,
+                    args_numbered: arg_spec_numbered,
                     ..
                 } => {
                     iter_step = 0;
@@ -1061,7 +1141,7 @@ impl<'a> SourcedFormatter<'a> {
                     if curr_pos == arg_start && presents.has(1) && index == 0 {
                         possible.push_str(&format!(
                             "\\THrs{{argument.{}}}",
-                            fmt_spec(spec[0])
+                            fmt_spec(spec, index, arg_spec_numbered)
                         ));
                     }
                 }
@@ -1107,13 +1187,14 @@ impl<'a> SourcedFormatter<'a> {
                     step: _,
                     presents,
                     spec,
+                    args_numbered: arg_spec_numbered,
                 } => {
                     if len > 0 && presents.has(index + 1) {
                         self.fmt_raw(
                             stream,
                             format_args!(
                                 "\\THre{{argument.{}}}",
-                                fmt_spec(spec[index as usize])
+                                fmt_spec(spec, index, arg_spec_numbered)
                             ),
                         )?;
                     }
@@ -1145,6 +1226,7 @@ impl<'a> SourcedFormatter<'a> {
                     step,
                     presents,
                     spec,
+                    args_numbered: arg_spec_numbered,
                 } => {
                     if len > index {
                         if curr_pos == arg_start && presents.has(1) {
@@ -1153,7 +1235,7 @@ impl<'a> SourcedFormatter<'a> {
                                 stream,
                                 format_args!(
                                     "\\THrs{{argument.{}}}",
-                                    fmt_spec(spec[0])
+                                    fmt_spec(spec, index, arg_spec_numbered)
                                 ),
                             )?;
                         }
@@ -1169,7 +1251,11 @@ impl<'a> SourcedFormatter<'a> {
                                     stream,
                                     format_args!(
                                         "\\THre{{argument.{}}}",
-                                        fmt_spec(spec[index as usize])
+                                        fmt_spec(
+                                            spec,
+                                            index,
+                                            arg_spec_numbered
+                                        )
                                     ),
                                 )?;
                             }
@@ -1184,7 +1270,11 @@ impl<'a> SourcedFormatter<'a> {
                                     stream,
                                     format_args!(
                                         "\\THrs{{argument.{}}}",
-                                        fmt_spec(spec[index as usize + 1])
+                                        fmt_spec(
+                                            spec,
+                                            index + 1,
+                                            arg_spec_numbered
+                                        )
                                     ),
                                 )?;
                             }
@@ -1196,6 +1286,7 @@ impl<'a> SourcedFormatter<'a> {
                             presents,
                             step,
                             spec,
+                            args_numbered: arg_spec_numbered,
                         };
                         let new_range = RangeKind { inner, ..range };
                         log::trace!(
@@ -1237,6 +1328,7 @@ impl<'a> SourcedFormatter<'a> {
                 step,
                 presents,
                 spec: _,
+                args_numbered: _,
             } => {
                 if len == 0 || len == r_idx {
                     false
@@ -1330,6 +1422,7 @@ impl<'a> SourcedFormatter<'a> {
                     step,
                     presents,
                     spec,
+                    args_numbered: arg_numbered,
                 } => {
                     if len > 0 && i_idx == 0 && presents.has(1) {
                         let n = tokens
@@ -1362,6 +1455,7 @@ impl<'a> SourcedFormatter<'a> {
                                 step,
                                 presents: fake_present,
                                 spec,
+                                args_numbered: arg_numbered,
                             };
                             let mut new_r = *r;
                             new_r.inner = fake_inner;

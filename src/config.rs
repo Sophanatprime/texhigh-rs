@@ -19,10 +19,11 @@ use hashers::fx_hash::FxHasher;
 use indexmap::IndexMap;
 use log::warn;
 use regex::{Regex, RegexSet};
+use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize, Serializer};
 use smallvec::SmallVec;
 use std::collections::{BTreeSet, HashMap, HashSet};
-use std::fmt::Display;
+use std::fmt::{Debug, Display};
 use std::hash::BuildHasherDefault;
 use std::ops::Deref;
 use std::path::Path;
@@ -31,10 +32,11 @@ use std::str::FromStr;
 use std::{fs, io};
 
 use crate::regtex::{RegTEx, RegTExSet};
-use crate::tex::{args_parser, CatCode};
+use crate::tex::{args_parser, CatCode, TokenList};
 use crate::tokenlist::SourcedTokenList;
 use crate::types::{
-    CTabSet, ErrorKind, Position, Token, TokenListBytes, TokenListBytesRef,
+    CTab, CTabSet, ErrorKind, Position, Token, TokenListBytes,
+    TokenListBytesRef,
 };
 
 #[derive(Debug, Clone)]
@@ -107,6 +109,83 @@ impl<
 {
 }
 
+pub struct ArgsParser {
+    pub start: Box<Category>,
+    pub finder: args_parser::ArgFinder,
+    pub args_spec: String,
+    pub start_is_arg: bool,
+}
+impl Debug for ArgsParser {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "ArgsParser {{ <inner> }}")
+    }
+}
+
+impl ArgsParser {
+    pub fn is_match(&self, pos: &Position<'_>) -> bool {
+        self.is_match_at(pos, ..)
+    }
+
+    pub fn is_match_at(
+        &self,
+        pos: &Position<'_>,
+        span: impl CategorySpan,
+    ) -> bool {
+        let Some(start) = self.start.match_len_at(pos, span.clone()) else {
+            return false;
+        };
+        if self.finder.len() == 0 {
+            return true;
+        }
+
+        let Some(tl) = pos.tl.and_then(|tl| tl.get(span)) else {
+            return false;
+        };
+        if self.start_is_arg {
+            return self.finder.find_all(tl).is_ok();
+        } else if start <= tl.len() {
+            // tl[start..] can be empty, finder may invalid from an empty slice
+            return self.finder.find_all(&tl[start ..]).is_ok();
+        } else {
+            return false;
+        }
+    }
+
+    pub fn match_len(&self, pos: &Position<'_>) -> Option<usize> {
+        self.match_len_at(pos, ..)
+    }
+
+    pub fn match_len_at(
+        &self,
+        pos: &Position<'_>,
+        span: impl CategorySpan,
+    ) -> Option<usize> {
+        let Some(start) = self.start.match_len_at(pos, span.clone()) else {
+            return None;
+        };
+        if self.finder.len() == 0 {
+            return Some(start);
+        }
+
+        let Some(tl) = pos.tl.and_then(|tl| tl.get(span)) else {
+            return None;
+        };
+        if self.start_is_arg {
+            let Ok(args) = self.finder.find_all(tl) else {
+                return None;
+            };
+            return Some(args.last().unwrap().end());
+        } else if start <= tl.len() {
+            let Ok(args) = self.finder.find_all(&tl[start ..]) else {
+                return None;
+            };
+            return Some(args.last().unwrap().end());
+        } else {
+            return None;
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum Category {
     None,
@@ -115,6 +194,7 @@ pub enum Category {
     String(String),
     Regex(Regex),
     RegTEx(RegTEx),
+    ArgsParser(ArgsParser),
 }
 
 impl PartialEq for Category {
@@ -144,6 +224,7 @@ impl PartialEq for Category {
                     false
                 }
             }
+            Self::ArgsParser { .. } => false,
         }
     }
 }
@@ -158,6 +239,9 @@ impl Display for Category {
             Self::String(s) => ("String", format!("({})", s)),
             Self::Regex(re) => ("Regex", format!("({})", re.as_str())),
             Self::RegTEx(re) => ("RegTEx", format!("({})", re.as_str())),
+            Self::ArgsParser(parser) => {
+                ("ArgsParser", format!("({:?})", parser))
+            }
         };
         write!(f, "Category::{}{}", name, value)
     }
@@ -176,6 +260,7 @@ impl Category {
             Category::RegTEx(re) => {
                 pos.bytes.is_some_and(|v| unsafe { re.is_match_bytes(v) })
             }
+            Category::ArgsParser(parser) => parser.is_match(pos),
         }
     }
     pub fn is_match_at(
@@ -196,6 +281,7 @@ impl Category {
             Category::RegTEx(re) => pos
                 .bytes
                 .is_some_and(|v| unsafe { re.is_match_bytes(&v[span]) }),
+            Category::ArgsParser(parser) => parser.is_match_at(pos, span),
         }
     }
     pub fn match_len(&self, pos: &Position<'_>) -> Option<usize> {
@@ -214,6 +300,7 @@ impl Category {
             Category::RegTEx(re) => pos.bytes.and_then(|v| {
                 unsafe { re.find_bytes(v) }.and_then(|m| Some(m.len()))
             }),
+            Category::ArgsParser(parser) => parser.match_len(pos),
         }
     }
     pub fn match_len_at(
@@ -236,6 +323,7 @@ impl Category {
             Category::RegTEx(re) => pos.bytes.and_then(|v| {
                 unsafe { re.find_bytes(&v[span]) }.and_then(|m| Some(m.len()))
             }),
+            Category::ArgsParser(parser) => parser.match_len_at(pos, span),
         }
     }
 }
@@ -250,13 +338,26 @@ impl Serialize for Category {
             Category::Any => serializer.collect_str("\\L"),
             Category::Span(span) => serializer.collect_seq(span),
             Category::String(s) => {
-                serializer.collect_str(&format!("\\L{}", s))
+                let mut l = serializer.serialize_struct("Literal", 1)?;
+                l.serialize_field("literal", s)?;
+                l.end()
             }
             Category::Regex(re) => {
-                serializer.collect_str(&format!("\\I{}", re.as_str()))
+                let mut r = serializer.serialize_struct("Regex", 1)?;
+                r.serialize_field("regex", re.as_str())?;
+                r.end()
             }
             Category::RegTEx(re) => {
-                serializer.collect_str(&format!("\\T{}", re.as_str()))
+                let mut r = serializer.serialize_struct("RegTEx", 1)?;
+                r.serialize_field("regtex", re.as_str())?;
+                r.end()
+            }
+            Category::ArgsParser(parser) => {
+                let mut s = serializer.serialize_struct("ArgsParser", 3)?;
+                s.serialize_field("start", &parser.start)?;
+                s.serialize_field("args_spec", &parser.args_spec)?;
+                s.serialize_field("start_is_arg", &parser.start_is_arg)?;
+                s.end()
             }
         }
     }
@@ -268,14 +369,31 @@ impl<'de> Deserialize<'de> for Category {
     {
         #[derive(Deserialize)]
         #[serde(untagged)]
-        enum StringOrSpan {
+        enum Inner {
             SpanRC([u32; 2]),
             Span(u32),
             String(String),
+            Literal {
+                literal: String,
+            },
+            Regex {
+                regex: String,
+            },
+            RegTEx {
+                regtex: String,
+            },
+            ArgsParser {
+                start: Box<Category>,
+                arguments: String,
+                start_is_arg: bool,
+            },
+            Category {
+                start: Box<Category>,
+            },
         }
-        let data = StringOrSpan::deserialize(deserializer)?;
+        let data = Inner::deserialize(deserializer)?;
         let item = match data {
-            StringOrSpan::String(s) => {
+            Inner::String(s) => {
                 if s.is_empty() {
                     Category::None
                 } else if s.starts_with("\\L") {
@@ -300,12 +418,42 @@ impl<'de> Deserialize<'de> for Category {
                     )
                 }
             }
-            StringOrSpan::SpanRC(span) => Category::Span(span),
-            StringOrSpan::Span(row) => {
+            Inner::SpanRC(span) => Category::Span(span),
+            Inner::Span(row) => {
                 if row == u32::MAX {
                     Category::Any
                 } else {
                     Category::Span([row, 0])
+                }
+            }
+            Inner::Literal { literal } => {
+                if literal.is_empty() {
+                    Category::Any
+                } else {
+                    Category::String(literal)
+                }
+            }
+            Inner::Regex { regex } => Category::Regex(
+                Regex::new(&regex).map_err(serde::de::Error::custom)?,
+            ),
+            Inner::RegTEx { regtex } => Category::RegTEx(
+                RegTEx::new(&regtex).map_err(serde::de::Error::custom)?,
+            ),
+            Inner::Category { start } => *start,
+            Inner::ArgsParser { start, arguments, start_is_arg } => {
+                let tokens = TokenList::parse(&arguments, &CTab::document());
+                let finder = args_parser::ArgFinder::parse(&tokens)
+                    .map_err(serde::de::Error::custom)?;
+                if finder.len() == 0 {
+                    // if finder is empty, which means there are no arguments, just take start
+                    *start
+                } else {
+                    Category::ArgsParser(ArgsParser {
+                        start,
+                        finder,
+                        args_spec: arguments,
+                        start_is_arg,
+                    })
                 }
             }
         };
@@ -910,6 +1058,8 @@ pub enum RangeItem {
         in_comments: RangeComments,
         #[serde(default)]
         start_is_arg: bool,
+        #[serde(default)]
+        args_numbered: bool,
     },
 }
 

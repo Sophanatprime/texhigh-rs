@@ -14,7 +14,10 @@ Copyright (C) 2024-2025, Wenjian Chern.
     You should have received a copy of the GNU General Public License
     along with this program.  If not, see <https://www.gnu.org/licenses/>. */
 
-use std::num::NonZeroU8;
+use std::{
+    fmt::{Debug, Display},
+    num::NonZeroU8,
+};
 
 use smallvec::SmallVec;
 
@@ -33,6 +36,63 @@ pub enum ErrorKind {
     UncompletedArg(char),
     UnimplementedArgSpec(char),
     UnexceptedEndGroupOrEof,
+}
+
+impl Display for ErrorKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ErrorKind::TooManyArgs { limits, real } => write!(
+                f,
+                "Too many arguments, allowed: {}, provided: {}",
+                *limits, *real
+            ),
+            ErrorKind::InvalidArgSpec(token) => write!(
+                f,
+                "Invalid argument specifier: {}",
+                token.to_str_repr()
+            ),
+            ErrorKind::InvalidArgDelimiter(token) => write!(
+                f,
+                "Invalid argument delimiter: {}",
+                token.to_str_repr()
+            ),
+            ErrorKind::InvalidTokenToTest(token) => {
+                write!(f, "Invalid token to test: {}", token.to_str_repr())
+            }
+            ErrorKind::UnsupportedArgSpec(c) => write!(
+                f,
+                "Unsupported argument specifier: {}",
+                escape_control(*c, b'^')
+            ),
+            ErrorKind::InconsistentGroupStatus(group) => write!(
+                f,
+                "{}",
+                match group {
+                    ArgGroupStatus::Disallowed =>
+                        "Groups are not allowed here",
+                    ArgGroupStatus::Optional =>
+                        "Groups may or may not appear here",
+                    ArgGroupStatus::Required => "A group is required here",
+                }
+            ),
+            ErrorKind::MissingMandatoryArg(c) => write!(
+                f,
+                "Missing mandatory argument: {}",
+                escape_control(*c, b'^')
+            ),
+            ErrorKind::UncompletedArg(c) => {
+                write!(f, "Uncompleted argument: {}", escape_control(*c, b'^'))
+            }
+            ErrorKind::UnimplementedArgSpec(c) => write!(
+                f,
+                "Unimplemented argument specifier: {}",
+                escape_control(*c, b'^')
+            ),
+            ErrorKind::UnexceptedEndGroupOrEof => {
+                write!(f, "End group or EOF is not supposed to be here")
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -282,38 +342,48 @@ fn gen_arg_spec_finder(
         b'\n' => {
             let t = scan_one_token(token_iter, ArgGroupStatus::Optional, true)
                 .map_err(|_| invalid_spec.clone())?;
-            let balanced = match &t {
-                Token::CS(cs) => {
-                    if matches!(cs.get_csname(), "c_true_bool" | "BooleanTrue")
-                    {
-                        true
-                    } else if matches!(
-                        cs.get_csname(),
-                        "c_false_bool" | "BooleanFalse"
-                    ) {
-                        false
-                    } else {
-                        return Err(invalid_spec);
-                    }
-                }
-                Token::Any(_) => return Err(invalid_spec),
-                Token::Char(chr) => {
-                    if matches!(chr.charcode, '1' | 't') {
-                        true
-                    } else if matches!(chr.charcode, '0' | 'f') {
-                        false
-                    } else {
-                        return Err(invalid_spec);
-                    }
-                }
-            };
+            let balanced = scan_bool(&t).map_err(|_| invalid_spec)?;
             ArgSpec::Line(balanced)
+        }
+        b',' => {
+            let t = scan_one_token(token_iter, ArgGroupStatus::Optional, true)
+                .map_err(|_| invalid_spec.clone())?;
+            let require_equal = scan_bool(&t).map_err(|_| invalid_spec)?;
+            ArgSpec::Key(require_equal)
         }
         _ => return Err(ErrorKind::UnsupportedArgSpec(spec_name as char)),
     };
 
     let finder = kind.into_finder(true)?;
     Ok(Some(finder))
+}
+
+fn scan_bool(token: &Token) -> Result<bool, ()> {
+    let ret = match token {
+        Token::CS(cs) => {
+            if matches!(cs.get_csname(), "c_true_bool" | "BooleanTrue") {
+                true
+            } else if matches!(
+                cs.get_csname(),
+                "c_false_bool" | "BooleanFalse"
+            ) {
+                false
+            } else {
+                return Err(());
+            }
+        }
+        Token::Any(_) => return Err(()),
+        Token::Char(chr) => {
+            if matches!(chr.charcode, '1' | 't') {
+                true
+            } else if matches!(chr.charcode, '0' | 'f') {
+                false
+            } else {
+                return Err(());
+            }
+        }
+    };
+    return Ok(ret);
 }
 
 fn skip_one_arg(
@@ -614,6 +684,7 @@ pub enum ArgSpec {
     W(SmallVec<[(Token, Option<Token>); 4]>, ArgMissingValue),
     */
     Line(bool),
+    Key(bool),
     Any(Finder),
 }
 
@@ -765,6 +836,7 @@ impl ArgSpec {
                 grabber_u(t_vec, 'U')
             }
             ArgSpec::Line(balanced) => grabber_current_line(balanced),
+            ArgSpec::Key(equals) => grabber_key(equals),
             ArgSpec::Any(finder) => finder,
         };
         Ok(finder)
@@ -959,7 +1031,7 @@ fn grabber_m(group: ArgGroupStatus) -> Finder {
                     )
                 });
             let skipped_spaces = index;
-            if start >= tl.len() {
+            if index >= tl.len() {
                 return Err(ErrorKind::MissingMandatoryArg('m'));
             }
 
@@ -1017,7 +1089,7 @@ fn grabber_d(
                 )
             });
         let skipped_spaces = index;
-        if start >= tl.len() {
+        if index >= tl.len() {
             if required {
                 return Err(ErrorKind::MissingMandatoryArg(spec_name));
             } else {
@@ -1095,7 +1167,7 @@ fn grabber_t(test: Token, spec_name: char) -> Finder {
                     )
                 });
             let skipped_spaces = index;
-            if start >= tl.len() {
+            if index >= tl.len() {
                 return Ok(Argument::UnPresent(start));
             }
             if &tl[index] == &test {
@@ -1121,7 +1193,7 @@ fn grabber_v() -> Finder {
                 )
             });
         let skipped_spaces = index;
-        if start >= tl.len() {
+        if index >= tl.len() {
             return Err(ErrorKind::MissingMandatoryArg('v'));
         }
 
@@ -1348,6 +1420,70 @@ fn grabber_current_line(balanced: bool) -> Finder {
     Box::new(finder)
 }
 
+fn grabber_key(require_equal: bool) -> Finder {
+    let finder =
+        move |tl: &[Token], start: usize| -> Result<Argument, ErrorKind> {
+            if start >= tl.len() {
+                return Err(ErrorKind::MissingMandatoryArg(','));
+            }
+            let mut index = start
+                + skip_if_char(&tl[start ..], |_, cat| {
+                    matches!(
+                        cat,
+                        CatCode::EndLine | CatCode::Space | CatCode::Ignored
+                    )
+                });
+            let skipped_spaces = index;
+            if index >= tl.len() {
+                return Err(ErrorKind::MissingMandatoryArg(','));
+            }
+
+            let mut has_equal = false;
+            while let Some(token) = tl.get(index) {
+                match token {
+                    Token::Char(chr)
+                        if chr.charcode == '='
+                            && matches!(
+                                chr.catcode,
+                                CatCode::Other | CatCode::Active
+                            ) =>
+                    {
+                        has_equal = true;
+                        index += 1;
+                    }
+                    Token::Char(chr)
+                        if chr.charcode == ','
+                            && matches!(
+                                chr.catcode,
+                                CatCode::Other | CatCode::Active
+                            ) =>
+                    {
+                        index += 1;
+                        break;
+                    }
+                    Token::Char(chr) if chr.catcode == CatCode::EndGroup => {
+                        return Ok(Argument::UnPresent(start));
+                    }
+                    Token::Char(chr) if chr.catcode == CatCode::BeginGroup => {
+                        index += 1;
+                        skip_to_end_group(tl, &mut index)
+                            .map_err(|_| ErrorKind::UnexceptedEndGroupOrEof)?;
+                    }
+                    Token::Any(_) => index += 1,
+                    Token::CS(_) => index += 1,
+                    Token::Char(_) => index += 1,
+                }
+            }
+
+            if require_equal && !has_equal {
+                return Ok(Argument::UnPresent(start));
+            } else {
+                return Ok(Argument::Present(skipped_spaces, index));
+            }
+        };
+    Box::new(finder)
+}
+
 
 #[cfg(test)]
 mod tests {
@@ -1533,12 +1669,13 @@ mod tests {
         )
         .is_err());
 
-        let tl = TokenList::parse(r" { ab\f } {.} \relax {}", &catcode);
+        let tl = TokenList::parse(r" { ab\f } {.} \relax {} { }", &catcode);
         let mut iter = tl.iter();
         assert_eq!(scan_tokens(&mut iter), Ok(&tl[2 .. 7]));
         assert_eq!(scan_tokens(&mut iter), Ok(&tl[10 .. 11]));
         assert_eq!(scan_tokens(&mut iter), Ok(&tl[13 .. 14]));
         assert_eq!(scan_tokens(&mut iter), Ok(&tl[16 .. 16]));
+        assert_eq!(scan_tokens(&mut iter), Ok(&tl[19 .. 20]));
         assert_eq!(scan_tokens(&mut iter), Err(()));
     }
 
@@ -1807,6 +1944,31 @@ mod tests {
         let args = finder.find_all(&source).unwrap();
         assert_eq!(&args[0], &Argument::Ending(8, 9));
         assert_eq!(&args[1], &Argument::Ending(9, 9));
+
+        let source = TokenList::parse(r"{\def^^M\}\fi^^M", &catcode);
+        assert_eq!(
+            finder.find_all(&source),
+            Err(ErrorKind::UnexceptedEndGroupOrEof)
+        );
+    }
+
+    #[test]
+    fn test_grab_key() {
+        let catcode = CTab::document();
+
+        let spec =
+            TokenList::parse(r"^^M ,{t} ,{\BooleanFalse } ^^M", &catcode);
+        let finder = ArgFinder::parse(&spec).unwrap();
+
+        let source = TokenList::parse(r"^^M abc = a{,}, \relax", &catcode);
+        let args = finder.find_all(&source).unwrap();
+        assert_eq!(&args[0], &Argument::Present(2, 13));
+        assert_eq!(&args[1], &Argument::Present(14, 15));
+
+        let source = TokenList::parse(r" key, \value\,=value{,}, ", &catcode);
+        let args = finder.find_all(&source).unwrap();
+        assert_eq!(&args[0], &Argument::UnPresent(0));
+        assert_eq!(&args[1], &Argument::Present(1, 5));
 
         let source = TokenList::parse(r"{\def^^M\}\fi^^M", &catcode);
         assert_eq!(

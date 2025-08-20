@@ -38,11 +38,13 @@ enabled_ranges = []
 # escape
 # texhigh is according to the existence of <remove_start> key to detect whether a range is escaped or not.
 # keys:
-# <start> is '<TeX regular expression>' or '\T<TeX Regular Expression>' or '\I<Regular Expression>' or '\L<plain text>'.
+# <start> is '<TeX regular expression>' or '\T<TeX Regular Expression>' or '\I<Regular Expression>' or '\L<plain text>' or
+# { literal: '<plain text>' } or { 'regex': <Regular Expression> } or { 'regtex': <TeX Regular Expression> } or
+# { 'start': <start>, arguments: <arguments>, start_is_arg: <start_is_arg> }.
 # regular expression (both TeX and text) must be start-anchored (i.e., '\I^\\relax')
 # <arguments> is the ltcmd (xparse) argument spec.
 # <remove_start> will remove the starting component of a range.
-# <use_argument> will remove the delimiters or braces of a argument.
+# <use_argument> will remove the delimiters or braces of a argument but only if <remove_start> is also true.
 # <insert_brace> will insert a `{` before the arguments and insert a `}` after the arguments.
 # if <use_argument> is true, <insert_ending> will insert the endline char (`\n`) after the range if the argument is one of `u`, `u`, `^^J`.
 # <in_comments> sets the region of a range to be detected, can be "required", "never", "any".
@@ -61,6 +63,7 @@ enabled_ranges = []
 # <insert_ending>
 # <in_comments>
 # <start_is_arg>
+# <args_numbered> sets if range names use arg spec name or arg position, i.e, 'argument.o' or 'argument.1'.
 usepackage = { start='^(?:\c{usepackage}|\c{RequirePackage})', arguments='omo' }
 documentclass = { start='^\c{document(?:class|style)}', arguments='om' }
 comment = { start='^\cC.(?:$|[\c[JS].\w])', arguments='^^J{f}' }
