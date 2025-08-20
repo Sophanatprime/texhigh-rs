@@ -643,18 +643,16 @@ impl CTabSet {
         match name {
             "other" => {
                 ctab.emplace_item(char::MIN ..= char::MAX, CatCode::Other);
-                ctab.escape = ctab.escape;
-                ctab.endline = ctab.endline;
                 self.ctabs
                     .insert(name.to_string(), Rc::new(RefCell::new(ctab)));
                 false
             }
-            "CJK" if ctab.is_empty() => {
-                let mut ctab = CTab::cjk_ideographs(catcode);
-                ctab.escape = ctab.escape;
-                ctab.endline = ctab.endline;
+            "CJK" => {
+                let mut new_ctab = CTab::cjk_ideographs(catcode);
+                new_ctab.escape = ctab.escape;
+                new_ctab.endline = ctab.endline;
                 self.ctabs
-                    .insert(name.to_string(), Rc::new(RefCell::new(ctab)));
+                    .insert(name.to_string(), Rc::new(RefCell::new(new_ctab)));
                 false
             }
             _ => {
