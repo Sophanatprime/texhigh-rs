@@ -630,7 +630,7 @@ impl<'a> SourcedFormatter<'a> {
         }
     }
     fn detect_range(&self) -> Option<usize> {
-        use crate::config::{Category, RangeItem};
+        use crate::config::RangeItem;
 
         // current token position
         let curr_pos = self.index.get(); // end <= tl.len()
@@ -666,56 +666,7 @@ impl<'a> SourcedFormatter<'a> {
                 return None;
             }
 
-            let arg_pos = match start {
-                Category::Any => curr_pos,
-                Category::None => return None,
-                Category::Span(_) => return None,
-                Category::String(s) => {
-                    let source =
-                        self.tokenlist.source_get(curr_pos ..).unwrap();
-                    if !source.starts_with(s) {
-                        return None;
-                    }
-                    let source_end =
-                        self.tokenlist.source_indices()[curr_pos] + s.len();
-                    let arg_pos = match self
-                        .tokenlist
-                        .source_indices()
-                        .binary_search(&source_end)
-                    {
-                        Ok(count) => count,
-                        Err(count) => count,
-                    };
-                    arg_pos
-                }
-                Category::Regex(re) => {
-                    let source =
-                        self.tokenlist.source_get(curr_pos ..).unwrap();
-                    let source_end =
-                        self.tokenlist.source_indices()[curr_pos] + re.find(source)?.end();
-                    let arg_pos = match self
-                        .tokenlist
-                        .source_indices()
-                        .binary_search(&source_end)
-                    {
-                        Ok(count) => count,
-                        Err(count) => count,
-                    };
-                    arg_pos
-                }
-                Category::RegTEx(re) => {
-                    let bytes = self.tokenlist.bytes_get(curr_pos ..).unwrap();
-                    let token_counts = unsafe {
-                        let end = re.find_bytes(bytes)?.end();
-                        TokenBytes::tokens_len_unchecked(&bytes[.. end])
-                    };
-                    curr_pos + token_counts
-                }
-                Category::ArgsParser(parser) => {
-                    let args = parser.finder.find_all(&tl[curr_pos..]).ok()?;
-                    curr_pos + args.last().map_or(0, |arg| arg.end())
-                }
-            };
+            let arg_pos = match_len(start, &self.tokenlist, curr_pos)?;
             log::trace!(
                 "Found range [key: {:?}] {{ start_pos: {}, arg_pos: {}, item: {:?} }}",
                 k, curr_pos, arg_pos, r
@@ -1716,6 +1667,62 @@ impl<'a> SourcedFormatter<'a> {
         Ok(())
     }
 }
+
+fn match_len(
+    start: &crate::config::Category,
+    stl: &SourcedTokenList,
+    curr_pos: usize,
+) -> Option<usize> {
+    if curr_pos > stl.len() {
+        return None;
+    }
+
+    let arg_pos = match start {
+        Category::Any => curr_pos,
+        Category::None => return None,
+        Category::Span(_) => return None,
+        Category::String(s) => {
+            let source = stl.source_get(curr_pos ..).unwrap();
+            if !source.starts_with(s) {
+                return None;
+            }
+            let source_end = stl.source_indices()[curr_pos] + s.len();
+            let arg_pos = match stl.source_indices().binary_search(&source_end)
+            {
+                Ok(count) => count,
+                Err(count) => count,
+            };
+            arg_pos
+        }
+        Category::Regex(re) => {
+            let source = stl.source_get(curr_pos ..).unwrap();
+            let source_end =
+                stl.source_indices()[curr_pos] + re.find(source)?.end();
+            let arg_pos = match stl.source_indices().binary_search(&source_end)
+            {
+                Ok(count) => count,
+                Err(count) => count,
+            };
+            arg_pos
+        }
+        Category::RegTEx(re) => {
+            let bytes = stl.bytes_get(curr_pos ..).unwrap();
+            let token_counts = unsafe {
+                let end = re.find_bytes(bytes)?.end();
+                TokenBytes::tokens_len_unchecked(&bytes[.. end])
+            };
+            curr_pos + token_counts
+        }
+        Category::ArgsParser(parser) => {
+            let new_pos = match_len(&parser.start, stl, curr_pos)?;
+            let args =
+                parser.finder.find_all(&stl.tokenlist()[new_pos ..]).ok()?;
+            new_pos + args.last().map_or(0, |arg| arg.end())
+        }
+    };
+    Some(arg_pos)
+}
+
 impl<'a> HighFormat for SourcedFormatter<'a> {
     fn get_cs_catogery(&self, cs: &ControlSequence) -> CompactString {
         let csname = cs.get_csname();
