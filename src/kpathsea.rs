@@ -60,7 +60,7 @@ impl KpseWhich {
         expand_brace: bool,
     ) -> Option<String> {
         let mut cmd = Command::new(exe.as_ref());
-        info!(target: "KpseWhich command", "{}", exe.as_ref().display());
+        info!("KpseWhich command: {}", exe.as_ref().display());
         if expand_brace {
             cmd.arg("--var-brace-value");
         } else {
@@ -71,8 +71,20 @@ impl KpseWhich {
             return None;
         };
         if !output.status.success() {
-            error!(target: "KpseWhich Exit Status", "{:?}", output.status);
+            log::trace!(
+                "KpseWhich stderr: {:?}",
+                String::from_utf8_lossy(&output.stderr)
+                    .lines()
+                    .collect::<Vec<_>>()
+            );
+            error!("KpseWhich Exit Status: {:?}", output.status);
         }
+        log::trace!(
+            "KpseWhich stdout: {:?}",
+            String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .collect::<Vec<_>>()
+        );
         let res = match get_decoder(&output.stdout, "") {
             Ok(encoding) => encoding.decode(&output.stdout).0.to_string(),
             Err(_) => String::from_utf8_lossy(&output.stdout).to_string(),
@@ -153,8 +165,8 @@ impl KpseWhich {
             .as_ref()
             .map(|v| v.as_os_str())
             .unwrap_or(OsStr::new("kpsewhich"));
-        info!(target: "KpseWhich command", "{}", kp_exe.display());
-        info!(target: "KpseWhich Arguments", "{:#?}", self);
+        info!("KpseWhich command: {}", kp_exe.display());
+        info!("KpseWhich Arguments: {:#?}", self);
         let mut cmd = Command::new(kp_exe);
         if self.all {
             cmd.arg("-all");
@@ -174,11 +186,23 @@ impl KpseWhich {
             None => remove_var("TEXINPUTS"),
         }
         cmd.arg(file);
-        info!(target: "KpseWhich RUN", "{:?}", &cmd.get_args().collect::<Vec<_>>());
+        info!("KpseWhich RUN: {:?}", &cmd.get_args().collect::<Vec<_>>());
         let output = cmd.output()?;
         if !output.status.success() {
-            error!(target: "KpseWhich Exit Status", "{:?}", output.status);
+            log::trace!(
+                "KpseWhich stderr: {:?}",
+                String::from_utf8_lossy(&output.stderr)
+                    .lines()
+                    .collect::<Vec<_>>()
+            );
+            error!("KpseWhich Exit Status: {:?}", output.status);
         }
+        log::trace!(
+            "KpseWhich stdout: {:?}",
+            String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .collect::<Vec<_>>()
+        );
         let s = get_decoder(&output.stdout, &self.encoding)?
             .decode(&output.stdout)
             .0;
@@ -211,7 +235,7 @@ pub(crate) fn get_decoder(
     };
     match codepage {
         Some(cp) => {
-            info!(target: "Using Encoding", "{}", cp.name());
+            info!("Using Encoding: {}", cp.name());
             Ok(cp)
         }
         None => Err(io::ErrorKind::Other.into()),

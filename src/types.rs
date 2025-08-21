@@ -1027,9 +1027,9 @@ impl CTabSet {
             ignored_lines += 1;
         }
         if ignored_lines > 0 {
-            warn!(target: "Parsing CTabSet", "Ignoring {} line(s).", ignored_lines);
+            warn!("Parsing CTabSet: Ignoring {} line(s).", ignored_lines);
         } else {
-            info!(target: "Parsing CTabSet", "Ignoring {} line(s).", ignored_lines);
+            info!("Parsing CTabSet: Ignoring {} line(s).", ignored_lines);
         }
         Ok(ctabset)
     }
@@ -1380,8 +1380,7 @@ impl<'a> CatCodeStack<'a> {
         while let Some(category) = categories_cache.last() {
             if category.is_match(pos) {
                 trace!(
-                    target: "Lexer",
-                    "Matched ending category: {} at [{}, {}]",
+                    "Lexer: Matched ending category: {} at [{}, {}]",
                     category,
                     pos.row,
                     pos.col
@@ -1401,8 +1400,7 @@ impl<'a> CatCodeStack<'a> {
         for (cs, ce, action) in &lexer.0 {
             if cs.is_match(pos) {
                 trace!(
-                    target: "Lexer",
-                    "Matching starting category: {} at [{}, {}]; ending: {}",
+                    "Lexer: Matching starting category: {} at [{}, {}]; ending: {}",
                     cs,
                     pos.row,
                     pos.col,

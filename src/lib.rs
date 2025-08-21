@@ -23,15 +23,13 @@ use memchr::memchr;
 use rayon::prelude::*;
 use std::collections::HashSet;
 use std::env::current_exe;
+use std::ffi::OsString;
 use std::fs::{self, File};
 use std::io::{self, BufReader, BufWriter, Read};
 use std::iter::{empty, zip};
 use std::path::{absolute as absolute_path, Path, PathBuf};
 use std::str::FromStr;
 use std::time;
-use std::{
-    env::set_var as set_env_var, env::var as get_env_var, ffi::OsString,
-};
 use textwrap::termwidth;
 use unicode_properties::UnicodeGeneralCategory;
 
@@ -437,7 +435,9 @@ pub fn get_matches() -> ArgMatches {
             arg!(--"logging-level" <LEVEL> "Set logging level")
                 .global(true)
                 .alias("ll")
-                .value_parser(["error", "warn", "info", "debug", "trace"]),
+                .value_parser([
+                    "error", "warn", "info", "debug", "trace", "off",
+                ]),
         )
         .arg(
             Arg::new("verbose")
@@ -461,27 +461,29 @@ pub fn get_matches() -> ArgMatches {
     if !matches.get_flag("no-banner") {
         print_copyright("This is TeXHigh,");
     }
-    match matches.get_one::<String>("logging-level") {
-        Some(level) => {
-            set_env_var("RUST_LOG", level);
-        }
-        None => match matches.get_count("verbose") {
-            0 => {}
-            1 => set_env_var("RUST_LOG", "error"),
-            2 => set_env_var("RUST_LOG", "warn"),
-            3 => set_env_var("RUST_LOG", "info"),
-            4 => set_env_var("RUST_LOG", "debug"),
-            5 => set_env_var("RUST_LOG", "trace"),
-            6 => set_env_var("RUST_LOG", "off"),
-            _ => set_env_var("RUST_LOG", "trace"),
+    let level = match matches.get_one::<String>("logging-level") {
+        Some(level) => match level.as_str() {
+            "off" => log::LevelFilter::Off,
+            "error" => log::LevelFilter::Error,
+            "warn" => log::LevelFilter::Warn,
+            "info" => log::LevelFilter::Info,
+            "debug" => log::LevelFilter::Debug,
+            "trace" => log::LevelFilter::Trace,
+            _ => log::LevelFilter::Warn,
         },
-    }
+        None => match matches.get_count("verbose") {
+            0 => log::LevelFilter::Warn,
+            1 => log::LevelFilter::Error,
+            2 => log::LevelFilter::Warn,
+            3 => log::LevelFilter::Info,
+            4 => log::LevelFilter::Debug,
+            5 => log::LevelFilter::Trace,
+            6 | _ => log::LevelFilter::Trace,
+        },
+    };
 
-    env_logger::init();
-    log::info!(
-        "Logging info: {}",
-        get_env_var("RUST_LOG").unwrap_or("<DEFAULT>".to_string())
-    );
+    let mut logger = env_logger::Builder::new();
+    logger.filter(Some("texhigh"), level).init();
 
     matches
 }
@@ -541,18 +543,21 @@ pub fn command_high(m: &ArgMatches) {
     let ctab = ctabset
         .get_by_name(ctab_name)
         .expect("Unknown current catcode table name.");
-    info!(target: "Highlight Config", "Current ctab: {}", ctab_name);
+    info!("Highlight Config: Current ctab: {}", ctab_name);
     let mut ctabs = CatCodeStack::new();
     match th_config.high_config.ctabs_fallback.get(ctab_name) {
         Some(ctab_name_vec) => {
-            info!(target: "Highlight Config", "Current ctab fallbacks: [{}]", ctab_name_vec.join(", "));
+            info!(
+                "Highlight Config: Current ctab fallbacks: [{}]",
+                ctab_name_vec.join(", ")
+            );
             for ctab_name in ctab_name_vec.iter().rev() {
                 match ctabset.get_by_name(ctab_name) {
                     Some(ctab_fallback) => {
                         ctabs.push(ctab_fallback);
                     }
                     None => {
-                        warn!(target: "Getting Current CTab fallback", "Unknown ctab name: {}", ctab_name)
+                        warn!("Getting Current CTab fallback: Unknown ctab name: {}", ctab_name)
                     }
                 }
             }
@@ -588,12 +593,12 @@ pub fn command_high(m: &ArgMatches) {
     let enhanced = m.get_flag("enhanced");
 
     let replace_tab = |s: String| -> String {
-        if th_config.high_config.tabs_len.0 == 0
+        if th_config.high_config.tabs_len == 0
             || (th_config.high_config.replace_tab
                 && memchr(b'\t', s.as_bytes()).is_some())
         {
-            if th_config.high_config.tabs_len.0 > 1 {
-                let tabs_len = th_config.high_config.tabs_len.0 as usize;
+            if th_config.high_config.tabs_len > 1 {
+                let tabs_len = th_config.high_config.tabs_len.inner() as usize;
                 s.replace('\t', &" ".repeat(tabs_len))
             } else {
                 s.replace('\t', " ")
@@ -604,7 +609,7 @@ pub fn command_high(m: &ArgMatches) {
     };
     let keep_necessary = |s: String| -> String {
         if th_config.high_config.lines == [0, 0]
-            && th_config.high_config.gobble.0 == 0
+            && th_config.high_config.gobble == 0
         {
             let mut s = s;
             if s.ends_with("\r\n") {
@@ -615,8 +620,8 @@ pub fn command_high(m: &ArgMatches) {
             return s;
         }
         if th_config.high_config.lines == [0, 0] {
-            let gobble = if th_config.high_config.gobble.0 > 0 {
-                th_config.high_config.gobble.0 as usize
+            let gobble = if th_config.high_config.gobble > 0 {
+                th_config.high_config.gobble.inner() as usize
             } else {
                 let mut gobble = 0;
                 for &b in s.as_bytes() {
@@ -643,8 +648,8 @@ pub fn command_high(m: &ArgMatches) {
             let lines = s
                 .lines()
                 .skip(line_start - if line_start > 0 { 1 } else { 0 });
-            let gobble = if th_config.high_config.gobble.0 > 0 {
-                th_config.high_config.gobble.0 as usize
+            let gobble = if th_config.high_config.gobble > 0 {
+                th_config.high_config.gobble.inner() as usize
             } else {
                 let gobble_line = if let Some(l) = lines.clone().next() {
                     let mut gobble = 0;
@@ -720,7 +725,11 @@ pub fn command_high(m: &ArgMatches) {
         if fm_vec.len() == 1 {
             let fm = &fm_vec[0].0;
             let buffer_size = get_buffer_size(fm_vec[0].2);
-            info!(target: "Output", "Writing to {}, buffer size {}", out.as_os_str().to_string_lossy(), buffer_size);
+            info!(
+                "Output: Writing to {}, buffer size {}",
+                out.as_os_str().to_string_lossy(),
+                buffer_size
+            );
             if let Some(parent) = out.parent() {
                 fs::create_dir_all(parent).expect(&format!(
                     "Cannot create directory '{}'",
@@ -753,7 +762,10 @@ pub fn command_high(m: &ArgMatches) {
                     }
                 }
                 let buffer_size = get_buffer_size(*file_size);
-                info!(target: "Output", "Writing to {}, buffer size {}", file, buffer_size);
+                info!(
+                    "Output: Writing to {}, buffer size {}",
+                    file, buffer_size
+                );
                 let mut f = BufWriter::with_capacity(
                     buffer_size,
                     fs::File::create(&file_path)
@@ -853,7 +865,7 @@ fn get_thconfig(m: &ArgMatches) -> THConfig {
         let mut ctab_set: Vec<CTabSet> =
             Vec::with_capacity(ctab_set_indices.len());
         for ct in ctab_set_fn {
-            info!(target: "Finding ctab-file", "{}", ct);
+            info!("Finding ctab-file: {}", ct);
             // do we need kpsewhich?
             let mut f =
                 BufReader::new(File::open(ct).expect("Unknown ctab-file"));
@@ -956,17 +968,20 @@ fn get_highconfig(m: &ArgMatches) -> HighConfig {
                 match kpse.output(config_str) {
                     Ok(source) => {
                         for f in &source {
-                            info!(target: "Finding config file", "{}", f);
+                            info!("Finding config file: {}", f);
                             config = config
                                 .add_source(File::new(f, FileFormat::Toml));
                         }
                     }
                     Err(_) => {
-                        warn!(target: "Finding config file", "Unknown file: {}", config_str)
+                        warn!(
+                            "Finding config file: Unknown file: {}",
+                            config_str
+                        )
                     }
                 }
             } else {
-                info!(target: "Finding config file", "{}", config_str);
+                info!("Finding config file: {}", config_str);
                 config =
                     config.add_source(File::new(config_str, FileFormat::Toml));
             }

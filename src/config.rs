@@ -808,12 +808,33 @@ impl CSCategories {
 
 #[derive(Debug, Serialize, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(transparent)]
-pub struct ShortInt(pub i16);
+pub struct ShortInt(i16);
+
+impl ShortInt {
+    pub fn inner(&self) -> i16 {
+        self.0
+    }
+}
 
 impl Deref for ShortInt {
     type Target = i16;
     fn deref(&self) -> &Self::Target {
         &self.0
+    }
+}
+impl PartialEq<i16> for ShortInt {
+    fn eq(&self, other: &i16) -> bool {
+        self.0.eq(other)
+    }
+}
+impl PartialOrd<i16> for ShortInt {
+    fn partial_cmp(&self, other: &i16) -> Option<std::cmp::Ordering> {
+        self.0.partial_cmp(other)
+    }
+}
+impl From<i16> for ShortInt {
+    fn from(value: i16) -> Self {
+        ShortInt(value)
     }
 }
 
@@ -888,9 +909,9 @@ impl HighConfig {
                 true
             } else {
                 warn!(
-                    target: "argument counts",
                     "Too many arguments for {:?} ({} arguments found)",
-                    args.args_specs(), args.len()
+                    args.args_specs(),
+                    args.len()
                 );
                 false
             };
