@@ -49,6 +49,8 @@ enabled_ranges = []
 # if <use_argument> is true, <insert_ending> will insert the endline char (`\n`) after the range if the argument is one of `u`, `u`, `^^J`.
 # <in_comments> sets the region of a range to be detected, can be "required", "never", "any".
 # <start_is_arg> sets if treat <start> as a part of argument
+# <skip_if_pre> = [ 'Regular Expression', ... ], if the source before the <start> matches regex, it will ignore this range.
+# <skip_if_post> = [ 'Regular Expression', ... ], if the source after the <start> matches regex, it will ignore this range.
 '+[$$]escapemath' = { start='^\cM\$', arguments='u{$}', remove_start=false }
 # '+[$$]escapemath' = { start='^\cM\$', arguments='r$$', remove_start=false, start_is_arg=true }
 '+[()]escapemath' = { start='^\c{\(}', arguments='u\)', remove_start=false }
@@ -64,6 +66,8 @@ enabled_ranges = []
 # <in_comments>
 # <start_is_arg>
 # <args_numbered> sets if range names use arg spec name or arg position, i.e, 'argument.o' or 'argument.1'.
+# <skip_if_pre>
+# <skip_if_post>
 usepackage = { start='^(?:\c{usepackage}|\c{RequirePackage})', arguments='omo' }
 documentclass = { start='^\c{document(?:class|style)}', arguments='om' }
 comment = { start='^\cC.(?:$|[\c[JS].\w])', arguments='^^J{f}' }

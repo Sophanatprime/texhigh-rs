@@ -19,7 +19,7 @@ use hashers::fx_hash::FxHasher;
 use indexmap::IndexMap;
 use log::warn;
 use regex::{Regex, RegexSet};
-use serde::ser::SerializeStruct;
+use serde::ser::{SerializeSeq, SerializeStruct};
 use serde::{Deserialize, Serialize, Serializer};
 use smallvec::SmallVec;
 use std::collections::{BTreeSet, HashMap, HashSet};
@@ -1069,6 +1069,8 @@ pub enum RangeItem {
         in_comments: RangeComments,
         #[serde(default)]
         start_is_arg: bool,
+        #[serde(default, flatten)]
+        filter: RangeFilter,
     },
     Normal {
         start: Category,
@@ -1081,6 +1083,8 @@ pub enum RangeItem {
         start_is_arg: bool,
         #[serde(default)]
         args_numbered: bool,
+        #[serde(flatten)]
+        filter: RangeFilter,
     },
 }
 
@@ -1101,6 +1105,12 @@ impl RangeItem {
         match self {
             RangeItem::Escape { start_is_arg, .. } => *start_is_arg,
             RangeItem::Normal { start_is_arg, .. } => *start_is_arg,
+        }
+    }
+    pub fn filter(&self) -> &RangeFilter {
+        match self {
+            RangeItem::Escape { filter, .. } => filter,
+            RangeItem::Normal { filter, .. } => filter,
         }
     }
 }
@@ -1179,6 +1189,52 @@ pub enum RangeComments {
 impl Default for RangeComments {
     fn default() -> Self {
         Self::Irrelevant
+    }
+}
+
+#[derive(Debug, Default, Deserialize, Serialize)]
+pub struct RangeFilter {
+    #[serde(default)]
+    pub skip_if_pre: FilterType,
+    #[serde(default)]
+    pub skip_if_post: FilterType,
+}
+
+#[derive(Debug)]
+pub struct FilterType(RegexSet);
+impl Deref for FilterType {
+    type Target = RegexSet;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl Default for FilterType {
+    fn default() -> Self {
+        FilterType(RegexSet::empty())
+    }
+}
+
+impl Serialize for FilterType {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut s = serializer.serialize_seq(Some(self.len()))?;
+        for re in self.0.patterns() {
+            s.serialize_element(re)?;
+        }
+        s.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for FilterType {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let set: Vec<String> = Vec::deserialize(deserializer)?;
+        Ok(FilterType(RegexSet::new(set).map_err(serde::de::Error::custom)?))
     }
 }
 

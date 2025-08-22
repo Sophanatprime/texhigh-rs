@@ -656,9 +656,9 @@ impl<'a> SourcedFormatter<'a> {
         // use captures to skip unnecessary tokens??
         let is_comment = self.in_comment.get();
         let (arg_pos, key, item) = ranges.iter().find_map(|(k, r)| {
-            let (start, in_comments) = match r {
-                RangeItem::Escape { start, in_comments, .. } => (start, in_comments),
-                RangeItem::Normal { start, in_comments, .. } => (start, in_comments),
+            let (start, in_comments, filter) = match r {
+                RangeItem::Escape { start, in_comments, filter, .. } => (start, in_comments, filter),
+                RangeItem::Normal { start, in_comments, filter, .. } => (start, in_comments, filter),
             };
 
             if (is_comment && *in_comments == RangeComments::Forbidden)
@@ -666,7 +666,7 @@ impl<'a> SourcedFormatter<'a> {
                 return None;
             }
 
-            let arg_pos = match_len(start, &self.tokenlist, curr_pos)?;
+            let arg_pos = match_len(k, start, &self.tokenlist, curr_pos, filter)?;
             log::trace!(
                 "Found range [key: {:?}] {{ start_pos: {}, arg_pos: {}, item: {:?} }}",
                 k, curr_pos, arg_pos, r
@@ -690,6 +690,7 @@ impl<'a> SourcedFormatter<'a> {
                 insert_ending,
                 in_comments: _,
                 start_is_arg: _,
+                filter: _,
             } => {
                 let args = match arguments.find_all(args_tl) {
                     Ok(args) => args,
@@ -831,6 +832,7 @@ impl<'a> SourcedFormatter<'a> {
                 in_comments: _,
                 start_is_arg: _,
                 args_numbered,
+                filter: _,
             } => {
                 let args = match arguments.find_all(args_tl) {
                     Ok(args) => args,
@@ -1669,9 +1671,11 @@ impl<'a> SourcedFormatter<'a> {
 }
 
 fn match_len(
+    name: &str,
     start: &crate::config::Category,
     stl: &SourcedTokenList,
     curr_pos: usize,
+    filter: &crate::config::RangeFilter,
 ) -> Option<usize> {
     if curr_pos > stl.len() {
         return None;
@@ -1714,12 +1718,39 @@ fn match_len(
             curr_pos + token_counts
         }
         Category::ArgsParser(parser) => {
-            let new_pos = match_len(&parser.start, stl, curr_pos)?;
+            let new_pos =
+                match_len(name, &parser.start, stl, curr_pos, filter)?;
             let args =
                 parser.finder.find_all(&stl.tokenlist()[new_pos ..]).ok()?;
             new_pos + args.last().map_or(0, |arg| arg.end())
         }
     };
+
+    if !filter.skip_if_pre.is_empty() {
+        if let Some(before) = stl.source_get(.. curr_pos) {
+            if filter.skip_if_pre.is_match(before) {
+                log::trace!(
+                    "Ignoring range: '{}' at {}, cause pre_filter",
+                    name,
+                    curr_pos
+                );
+                return None;
+            }
+        }
+    }
+    if !filter.skip_if_post.is_empty() {
+        if let Some(after) = stl.source_get(arg_pos ..) {
+            if filter.skip_if_post.is_match(after) {
+                log::trace!(
+                    "Ignoring range: '{}' at {}, cause post_filter",
+                    name,
+                    curr_pos
+                );
+                return None;
+            }
+        }
+    }
+
     Some(arg_pos)
 }
 
