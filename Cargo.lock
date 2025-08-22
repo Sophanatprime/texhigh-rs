@@ -1773,7 +1773,7 @@ dependencies = [
 
 [[package]]
 name = "texhigh"
-version = "0.3.3"
+version = "0.3.4-a"
 dependencies = [
  "anstyle",
  "anyhow",
