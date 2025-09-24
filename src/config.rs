@@ -628,7 +628,7 @@ impl<'de> Deserialize<'de> for CategoryC {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Category3 {
     pub strings: HashSet<String, BuildHasherDefault<FxHasher>>,
     pub regexset: RegexSet,
@@ -889,6 +889,47 @@ pub struct HighConfig {
     #[serde(skip_serializing_if = "HashMap::is_empty")]
     pub ctabs_fallback:
         HashMap<String, Vec<String>, BuildHasherDefault<FxHasher>>,
+
+    #[serde(flatten)]
+    extra: IndexMap<String, ConfigExtra, BuildHasherDefault<FxHasher>>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(untagged)]
+enum ConfigExtra {
+    CharVec(Vec<char>),
+    String(String),
+    StringVec(Vec<String>),
+    LexerType((Category, Category, LexerAction)),
+}
+
+struct ConfigError(String);
+impl std::fmt::Debug for ConfigError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+impl std::fmt::Display for ConfigError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+impl std::error::Error for ConfigError {}
+impl serde::de::Error for ConfigError {
+    fn custom<T>(msg: T) -> Self
+    where
+        T: Display,
+    {
+        ConfigError(msg.to_string())
+    }
+}
+impl serde::ser::Error for ConfigError {
+    fn custom<T>(msg: T) -> Self
+    where
+        T: Display,
+    {
+        ConfigError(msg.to_string())
+    }
 }
 
 impl HighConfig {
@@ -897,6 +938,92 @@ impl HighConfig {
     }
 
     pub fn reorganize(&mut self) {
+        use serde::de::value::{SeqDeserializer, StringDeserializer};
+        let extra = std::mem::take(&mut self.extra);
+
+        // merge break_at, do_not_break, lexer, char_replacements, enabled_ranges
+        for (k, v) in extra {
+            match Self::sanitize_name(&k) {
+                "break_at" => {
+                    match v {
+                        ConfigExtra::CharVec(v) => self.break_at.0.extend(v),
+                        ConfigExtra::String(s) => {
+                            self.break_at.0.extend(s.chars())
+                        }
+                        _ => {
+                            log::warn!(
+                                "Invalid value type for HighConfig key: {}",
+                                k
+                            );
+                            continue;
+                        }
+                    };
+                }
+                "do_not_break" => match v {
+                    ConfigExtra::String(s) => {
+                        let de = StringDeserializer::<ConfigError>::new(s);
+                        match Category3::deserialize(de) {
+                                Ok(c) => self.do_not_break.push(c),
+                                Err(e) => log::warn!("Invalid value for HighConfig key: {}, error: {}", k, e.0),
+                            }
+                    }
+                    ConfigExtra::StringVec(v) => {
+                        let de = SeqDeserializer::<_, ConfigError>::new(
+                            v.into_iter(),
+                        );
+                        match Category3::deserialize(de) {
+                                Ok(c) => self.do_not_break.push(c),
+                                Err(e) => log::warn!("Invalid value for HighConfig key: {}, error: {}", k, e.0),
+                            }
+                    }
+                    _ => {
+                        log::warn!(
+                            "Invalid value type for HighConfig key: {}",
+                            k
+                        );
+                        continue;
+                    }
+                },
+                "lexer" => match v {
+                    ConfigExtra::LexerType(l) => self.lexer.0.push(l),
+                    _ => {
+                        log::warn!(
+                            "Invalid value type for HighConfig key: {}",
+                            k
+                        );
+                        continue;
+                    }
+                },
+                "char_replacements" => match v {
+                    ConfigExtra::CharVec(c) => {
+                        self.char_replacements.0.extend(c)
+                    }
+                    ConfigExtra::String(s) => {
+                        self.char_replacements.0.extend(s.chars())
+                    }
+                    _ => {
+                        log::warn!(
+                            "Invalid value type for HighConfig key: {}",
+                            k
+                        );
+                        continue;
+                    }
+                },
+                "enabled_ranges" => match v {
+                    ConfigExtra::StringVec(v) => self.enabled_ranges.extend(v),
+                    _ => {
+                        log::warn!(
+                            "Invalid value type for HighConfig key: {}",
+                            k
+                        );
+                        continue;
+                    }
+                },
+                _ => log::warn!("Unrecognized HighConfig key: {}", k),
+            }
+        }
+
+        // keep enabled ranges
         self.ranges.0.retain(|k, r| {
             let contain = self.enabled_ranges.contains(k);
             let contain_s =
@@ -964,6 +1091,8 @@ impl Default for HighConfig {
             char_categories: CharCategories::default(),
             cs_categories: CSCategories::default(),
             ctabs_fallback: HashMap::default(),
+
+            extra: Default::default(),
         }
     }
 }
@@ -1179,9 +1308,14 @@ impl<'de> Deserialize<'de> for RangeItemArgs {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum RangeComments {
-    #[serde(alias = "must")]
+    #[serde(alias = "must", alias = "yes", alias = "true")]
     Required,
-    #[serde(alias = "never", alias = "prohibited")]
+    #[serde(
+        alias = "never",
+        alias = "prohibited",
+        alias = "no",
+        alias = "false"
+    )]
     Forbidden,
     #[serde(alias = "dontcare", alias = "any")]
     Irrelevant,
@@ -1330,5 +1464,55 @@ mod tests {
         assert_eq!(HighConfig::sanitize_name("+[[123]]aaa"), "]aaa");
         assert_eq!(HighConfig::sanitize_name("+[123][456]aaa"), "[456]aaa");
         assert_eq!(HighConfig::sanitize_name("+[123aaa"), "[123aaa");
+    }
+
+    #[test]
+    fn config() {
+        let toml_config = r###"
+gobble = 0
+break_at = [' ']
+'+[1]break_at' = [","]
+'+[2]break_at' = ["\t"]
+break_indent = 2
+replace_tab = true
+tabs_len = "auto"
+lines = [0, 0]
+do_not_break = ['^relax.+']
+'+[1]do_not_break' = ['^not.+', '\T^\cC.']
+'+[2]do_not_break' = ['\T^\cB(\w|\d)']
+lexer = []
+'+[1]lexer' = [1, '', { action="CatCode", value="latex3" }]
+'+[2]lexer' = [4, [4, 100], { action="CatCode", value=[ ['a', 12], ['b', "other"] ] }]
+'+[3]lexer' = [8, 100, { action="EndLine", value=0xdead_beaf } ]
+char_replacements = []
+'+[1]char_replacements' = "abcd"
+'+[2]char_replacements' = [ 'A', 'B', 'C', 'D' ]
+enabled_ranges = []
+'+[1]enabled_ranges' = ["[]texcl", "escapemath"]
+
+[ranges]
+'[]texcl' = { start='^\cC.', arguments='^^J{t}', remove_start=true, use_argument=true, insert_ending=true, insert_brace=true }
+'+[$$]escapemath' = { start='^\cM\$', arguments='u{$}', remove_start=false }
+'+[()]escapemath' = { start='^\c{\(}', arguments='u\)', remove_start=false }
+
+[char_categories]
+[cs_categories]
+[ctabs_fallback]
+        "###;
+
+        let mut config = HighConfig::deserialize(
+            toml::Deserializer::parse(toml_config).unwrap(),
+        )
+        .unwrap();
+
+        assert!(!config.extra.is_empty());
+        config.reorganize();
+        assert!(config.extra.is_empty());
+
+        assert_eq!(config.break_at.0.len(), 3);
+        assert_eq!(config.do_not_break.len(), 3);
+        assert_eq!(config.lexer.0.len(), 3);
+        assert_eq!(config.char_replacements.0.len(), 8);
+        assert_eq!(config.enabled_ranges.len(), 2);
     }
 }

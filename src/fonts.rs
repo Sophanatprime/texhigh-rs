@@ -1321,24 +1321,22 @@ pub fn display_font_data<W: std::fmt::Write>(
     }
 
     // Tables & Labels.
-    let mut aval_tables = vec![];
-    #[rustfmt::skip]
-    const TABLE_TAGS: &[&[u8; 4]] = &[
-        b"avar", b"BASE", b"CBDT", b"CBLC", b"CFF ", b"CFF2", b"cmap", b"COLR", b"CPAL", b"cvar",
-        b"cvt ", b"DSIG", b"EBDT", b"EBLC", b"EBSC", b"fpgm", b"fvar", b"gasp", b"GDEF", b"glyf",
-        b"GPOS", b"GSUB", b"gvar", b"hdmx", b"head", b"hhea", b"hmtx", b"HVAR", b"JSTF", b"kern",
-        b"loca", b"LTSH", b"MATH", b"maxp", b"MERG", b"meta", b"MVAR", b"name", b"OS/2", b"PCLT",
-        b"post", b"prep", b"sbix", b"STAT", b"SVG ", b"VDMX", b"vhea", b"vmtx", b"VORG", b"VVAR",
-    ];
-    for &tag in TABLE_TAGS {
-        if face.table_data(skrifa::Tag::new(tag)).is_some() {
-            aval_tables.push(unsafe { std::str::from_utf8_unchecked(tag) });
-        }
+    let table_len = face.table_directory.num_tables() as usize;
+    let mut aval_tables = Vec::with_capacity(table_len);
+    for t in face.table_directory.table_records() {
+        aval_tables.push(t.tag().to_be_bytes());
     }
+    #[cfg(debug_assertions)]
+    assert_eq!(table_len, aval_tables.len());
     if !aval_tables.is_empty() {
+        let mut tables = aval_tables
+            .iter()
+            .map(|v| unsafe { str::from_utf8_unchecked(&v[..]) })
+            .collect::<Vec<_>>();
+        tables.sort();
         print_data(
             &format!("Tables ({})", aval_tables.len()),
-            &aval_tables.join(", "),
+            &tables.join(", "),
         )?;
     }
 

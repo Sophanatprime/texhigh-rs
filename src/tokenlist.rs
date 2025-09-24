@@ -1888,7 +1888,7 @@ impl<'a> HighFormat for SourcedFormatter<'a> {
         if no_break {
             log::trace!("Do not break before the token: {:?}", cs);
         } else {
-            self.fmt_break(stream, "char")?;
+            self.fmt_break(stream, "cs")?;
         }
 
         let cs_source = unsafe { self.source_at(index) };

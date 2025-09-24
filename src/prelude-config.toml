@@ -46,7 +46,7 @@ enabled_ranges = []
 # <remove_start> will remove the starting component of a range.
 # <use_argument> will remove the delimiters or braces of a argument but only if <remove_start> is also true.
 # <insert_brace> will insert a `{` before the arguments and insert a `}` after the arguments.
-# if <use_argument> is true, <insert_ending> will insert the endline char (`\n`) after the range if the argument is one of `u`, `u`, `^^J`.
+# if <use_argument> is true, <insert_ending> will insert the ending tokens after the range if the argument is one of `u`, `u`, `^^J`.
 # <in_comments> sets the region of a range to be detected, can be "required", "never", "any".
 # <start_is_arg> sets if treat <start> as a part of argument
 # <skip_if_pre> = [ 'Regular Expression', ... ], if the source before the <start> matches regex, it will ignore this range.
@@ -56,7 +56,7 @@ enabled_ranges = []
 '+[()]escapemath' = { start='^\c{\(}', arguments='u\)', remove_start=false }
 '[$$]escapeinside' = { start='^\cM\$', arguments='u{$}', remove_start=true, use_argument=true }
 '[||]escapeinside' = { start='^\cO\|', arguments='u{|}', remove_start=true, use_argument=true }
-'[]texcl' = { start='^\cC.', arguments='^^J{t}', remove_start=true, use_argument=true, insert_ending=true }
+'[]texcl' = { start='^\cC.', arguments='^^J{t}', remove_start=true, use_argument=true, insert_ending=true, insert_brace=true }
 '[e ]texcl' = { start='^\cC.e\ ', arguments='^^J{t}', remove_start=true, use_argument=true, insert_ending=true }
 # normal
 # keys:

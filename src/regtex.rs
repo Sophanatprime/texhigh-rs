@@ -169,6 +169,7 @@ impl RegTEx {
 }
 
 /// Regular expression set for TeX tokens.
+#[derive(Clone)]
 pub struct RegTExSet {
     regex_set: bytes::RegexSet,
     patterns: Arc<[String]>,
