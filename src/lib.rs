@@ -71,7 +71,7 @@ use crate::{
 };
 
 const FULL_VERSION: &str = env!("CARGO_PKG_VERSION");
-const DATE: &str = "2025/08/22";
+const DATE: &str = "2025/09/24";
 const COPYRIGHT: &str = "2024-2025, Wenjian Chern";
 
 pub fn print_copyright(s: &'static str) {
