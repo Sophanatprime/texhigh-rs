@@ -1821,7 +1821,6 @@ dependencies = [
  "walkdir",
  "which",
  "winapi",
- "yeslogic-unicode-blocks",
 ]
 
 [[package]]
@@ -2490,12 +2489,6 @@ name = "yazi"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e01738255b5a16e78bbb83e7fbba0a1e7dd506905cfc53f4622d89015a03fbb5"
-
-[[package]]
-name = "yeslogic-unicode-blocks"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a83312b81ea82fe168a11f2b3e5c2c3f3dfef73b6bfa1ce3a1d876f56990b5f0"
 
 [[package]]
 name = "zeno"

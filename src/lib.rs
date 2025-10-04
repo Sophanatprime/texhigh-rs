@@ -31,7 +31,6 @@ use std::path::{absolute as absolute_path, Path, PathBuf};
 use std::str::FromStr;
 use std::time;
 use textwrap::termwidth;
-use unicode_properties::UnicodeGeneralCategory;
 
 #[cfg(not(debug_assertions))]
 use mimalloc::MiMalloc;
@@ -68,6 +67,7 @@ use crate::{
     layout::OutputFormat,
     tokenlist::{SourcedFormatter, SourcedTokenList},
     types::{CTabSet, CatCodeStack, ErrorKind, TokenList},
+    unicode::properties::UnicodeGeneralCategory,
 };
 
 const FULL_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -1401,12 +1401,12 @@ pub fn command_layout(m: &ArgMatches) {
 
 pub fn command_text(m: &ArgMatches) {
     use regex::{Captures, Regex};
-    use unicode_linebreak::linebreaks;
-    use unicode_names2::name as uni_name;
-    use unicode_normalization::UnicodeNormalization;
-    use unicode_script::UnicodeScript;
-    use unicode_segmentation::UnicodeSegmentation;
-    use yeslogic_unicode_blocks::find_unicode_block;
+    use unicode::find_unicode_block;
+    use unicode::linebreak::linebreaks;
+    use unicode::names::name as uni_name;
+    use unicode::normalization::UnicodeNormalization;
+    use unicode::script::UnicodeScript;
+    use unicode::segmentation::UnicodeSegmentation;
 
     let ref raw_text = if m.contains_id("text") {
         get_command_str(m, "text")

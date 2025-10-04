@@ -27,12 +27,12 @@ use compact_str::{
 };
 use serde::{Deserialize, Deserializer, Serialize};
 use smallvec::SmallVec;
-use unicode_properties::{GeneralCategoryGroup, UnicodeGeneralCategory};
 
 use crate::{
     range::MinMaxValue,
     tex::circumflex_mechanism,
     types::{CatCodeGetter, TokenBytes, TokenListBytes},
+    unicode::properties::{GeneralCategoryGroup, UnicodeGeneralCategory},
     ErrorKind,
 };
 
