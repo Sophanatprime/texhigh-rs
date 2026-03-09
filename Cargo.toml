@@ -36,7 +36,7 @@ smallvec = { version = "1", features = ["serde", "write", "union", "const_generi
 sys-locale = "*"
 textwrap = { version = "*", features = ["terminal_size"] }
 tiny-skia = "*"
-toml = "^0.9"
+toml = "1.0"
 unicode-linebreak = "*"
 unicode-normalization = "*"
 unicode-properties = { version = "*", features = ["general-category", "emoji"] }

@@ -2307,5 +2307,23 @@ mod tests {
             r"[^a-c[^b-j\c[XO].\c{(no)?relax}][lm]]?",
             &[(r"d\a\norelax", true), (r"l\a\norelax", true)],
         );
+        test_pattern(r"\c{\p{scx=Latn}}", &[(r"\a", true), (r"\!", false)]);
+        test_pattern(
+            r"\c{\p{ASCII}}",
+            &[(r"\a", true), (r"\!", true), (r"\好", false)],
+        );
+        test_pattern(
+            r"\c{\p{AHex}}",
+            &[(r"\a", true), (r"\1", true), (r"\g", false)],
+        );
+        test_pattern(
+            r"\c{\p{Cased}}",
+            &[(r"\a", true), (r"\1", false), (r"\H", true)],
+        );
+        test_pattern(r"\c{\p{Han}}", &[(r"\a", false), (r"\好", true)]);
+        test_pattern(
+            r"\c{\p{scx=Cakm}}",
+            &[(r"\a", false), ("\\\u{1049}", true)],
+        );
     }
 }

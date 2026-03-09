@@ -6,7 +6,7 @@
 
 ## Installation
 
-Copy the executable file to the `bin` directory of your TeX environment, ensuring it is in the same directory as `kpsewhich`.
+Copy the executable file to the `bin` directory of your TeX environment, ensuring it is in the same directory as `kpsewhich`. This directory is the path you get when you execute `kpsewhich --var-value SELFAUTOLOC`.
 
 ## Building
 

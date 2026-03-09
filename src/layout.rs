@@ -122,6 +122,7 @@ impl Layout {
             text,
             &attrs,
             Shaping::Advanced,
+            None,
         );
         let mut line_is = vec![];
         for run in self.text_buffer.layout_runs() {

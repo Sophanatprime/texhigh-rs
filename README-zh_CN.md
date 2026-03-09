@@ -6,7 +6,8 @@
 
 # 安装
 
-将可执行文件复制到 TeX 环境的 `bin` 目录下，保证它与 `kpsewhich` 在同一个目录下即可。
+将可执行文件复制到 TeX 环境的 `bin` 目录下，保证它与 `kpsewhich` 在同一个目录下即可，
+该目录也就是执行 `kpsewhich --var-value SELFAUTOLOC` 输出的路径。
 
 # 构建
 
