@@ -331,9 +331,14 @@ impl Step for CatCode {
             None
         }
     }
+    fn forward_overflowing(start: Self, count: usize) -> (Self, bool) {
+        let sum = start as u8 + count as u8;
+        (unsafe { std::mem::transmute(sum.clamp(0, 15)) }, sum > 15)
+    }
     unsafe fn forward_unchecked(start: Self, count: usize) -> Self {
         std::mem::transmute(start as u8 + count as u8)
     }
+
     fn backward_checked(start: Self, count: usize) -> Option<Self> {
         let start = start as u8;
         if count <= start as u8 as usize {
@@ -345,6 +350,10 @@ impl Step for CatCode {
     }
     unsafe fn backward_unchecked(start: Self, count: usize) -> Self {
         std::mem::transmute(start as u8 - count as u8)
+    }
+    fn backward_overflowing(start: Self, count: usize) -> (Self, bool) {
+        let diff = (start as u8).checked_sub(count as u8);
+        (unsafe { std::mem::transmute(diff.unwrap_or(0)) }, diff.is_none())
     }
 }
 impl MinMaxValue for CatCode {
