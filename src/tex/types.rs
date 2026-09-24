@@ -654,6 +654,8 @@ pub fn escape_string_filter<T: AsRef<str>>(
             v.push(format_compact!("{}", c));
         } else if c.is_control() {
             v.push(escape_string_small(&escape_control(c, e), e));
+        } else if c > '\u{ff}' {
+            v.push(c.to_compact_string());
         } else {
             v.push(format_compact!("\"{:X} ", c as u32));
         }
@@ -668,6 +670,8 @@ pub fn escape_string_small<T: AsRef<str>>(s: T, e: u8) -> CompactString {
             v.push(format_compact!("{}", c));
         } else if c.is_control() {
             v.push(escape_string_small(&escape_control(c, e), e));
+        } else if c > '\u{ff}' {
+            v.push(c.to_compact_string());
         } else {
             v.push(format_compact!("\"{:X} ", c as u32));
         }
